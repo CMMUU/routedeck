@@ -1,6 +1,19 @@
-# RouteDeck
+# RouteDeck — 开源 Mihomo 桌面代理客户端
 
-基于 Rust + Tauri 2 的轻量跨平台 Mihomo 客户端，目标平台为 macOS、Linux 和 Windows。项目原名 `mihomo-codex`，从 0.6.0 开始使用独立品牌 RouteDeck；Mihomo 仍是底层代理内核。
+RouteDeck 是基于 **Mihomo** 内核、使用 Rust + Tauri 2 构建的开源桌面代理客户端，面向 Windows、macOS 和 Linux。通过中文界面管理 Clash Meta / Mihomo YAML 订阅、节点、分流规则和系统代理，并提供默认关闭的 Codex 本地兼容路由。
+
+**RouteDeck is an open-source Mihomo desktop proxy client for Windows, macOS, and Linux.** Built with Rust and Tauri 2, it provides subscription management, proxy selection, traffic rules, system proxy controls, and optional local routing for Codex. The local router is off by default; Windows TUN support is experimental.
+
+这是独立客户端项目，并非 Mihomo、Clash 或 OpenAI 的官方产品。项目原名 `mihomo-codex`，从 0.6.0 开始使用 RouteDeck 品牌。
+
+## 主要功能
+
+- **订阅管理**：导入订阅或本地配置，用紧凑卡片查看服务商返回的套餐流量、到期时间与更新状态；没有提供的数据会明确标注，不显示成零或不限量。
+- **节点与规则**：切换代理组和节点，查看延迟与连接，编辑分流规则，并保留配置版本与回滚入口。
+- **系统代理与程序代理**：管理系统代理，或为支持代理参数／环境变量的指定程序提供启动入口；不会强制关闭已有程序实例。
+- **可选 Codex 路由**：提供 HTTP/SSE 兼容模式与 WebSocket 原生透传。保存设置、启用本地服务、接入 Codex 是独立操作，接入前备份，恢复时检查冲突。
+- **OpenAI 稳定灾备**：支持按近期失败和可确认节点归属的模型流结果选择后备节点，配合节点保持、故障冷却与恢复滞后；已中断的数据流不能靠换节点无缝续接。
+- **日常桌面体验**：磨砂玻璃界面、浅色／深色／深紫与跟随系统主题、托盘、流量监控，以及 Gitee 优先、GitHub 备用的签名更新。
 
 ## 源码与下载
 
@@ -10,6 +23,13 @@
 - 安装包、SHA-256 校验文件和更新签名以 Release 页面实际附件为准；应用内自动更新同版本优先 Gitee，GitHub 备用。历史版本附件文件名保持不变。
 - Windows 10/11 TUN 为实验性功能，已实现管理员会话运行方式，尚未完成真实 TUN 路由与恢复验收。各平台的安装、构建和网络接管验证范围见 [v0.5.0 发布说明](docs/发布说明-v0.5.0.md)。
 - 自 2026-09-04 起，应用源码按 [GNU GPL v3（GPL-3.0-only）](LICENSE) 开源。第三方依赖沿用各自许可证，见 [第三方声明](THIRD_PARTY_NOTICES.md)、[v0.5.0 许可证清单](docs/compliance/v0.5.0/license-inventory.md) 和 [SBOM](docs/compliance/v0.5.0/sbom.cdx.json)。`package.json` 中的 `private: true` 仅防止意外发布到 npm，不限制源码访问或 GPL 授予的权利。
+
+## 快速开始
+
+1. 从上面的 Release 页面选择与系统和处理器架构匹配的安装包；渠道未提供对应附件时使用另一渠道，以实际发布内容为准。
+2. 在「订阅」添加自己的 Clash Meta / Mihomo YAML 订阅，或导入本地配置；本项目不提供代理节点或订阅服务。
+3. 选用配置，按需选择网络模式并启动；使用系统代理前先关闭其他客户端的系统代理／TUN，避免相互接管。
+4. Codex 本地路由不是普通代理使用的必要步骤，默认保持关闭。需要时先阅读下方「Codex 路由与稳定灾备」中的接入范围、备份与恢复说明。
 
 ## 设计文档
 
