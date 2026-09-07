@@ -135,7 +135,7 @@ app.innerHTML = `
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-mark"><img src="${appIconUrl}" alt="" width="40" height="40" /></div>
-        <div><strong>RouteDeck</strong><span>轻量稳定代理客户端</span></div>
+        <div><strong>Serylane</strong><span>轻量稳定代理客户端</span></div>
       </div>
       <nav class="nav-list" aria-label="主导航">${navigationMarkup}</nav>
       <div class="sidebar-footer">
@@ -980,7 +980,7 @@ async function checkForAppUpdate(silent: boolean) {
     const result = await api.checkAppUpdate();
     acceptAppUpdate(result);
     if (result.info?.available) {
-      toast(`发现 RouteDeck 新版本 ${result.info.latestVersion}`, "info");
+      toast(`发现 Serylane 新版本 ${result.info.latestVersion}`, "info");
     } else if (!silent) {
       toast(describeAppUpdate(result).label, "info");
     }
@@ -1319,7 +1319,7 @@ async function ensureTunHelperReady(): Promise<boolean> {
       return false;
     }
     await action("", () => api.openTunHelperSettings());
-    toast("请在系统设置中批准 RouteDeck TUN Helper，然后再次开启 TUN", "error");
+    toast("请在系统设置中批准 Serylane TUN Helper（安装名称 RouteDeck），然后再次开启 TUN", "error");
     return false;
   }
   if (helper.state !== "ready") {
@@ -2338,7 +2338,7 @@ $("#app-update-check")!.addEventListener("click", () => {
 $("#app-update-open")!.addEventListener("click", async () => {
   const update = store.appUpdate;
   if (!update) return;
-  await action("已打开 RouteDeck 官方更新页面", () =>
+  await action("已打开 Serylane 官方更新页面", () =>
     api.openOfficialRelease(update.source, update.latestVersion),
   );
 });
@@ -2370,8 +2370,8 @@ $("#app-update-install")!.addEventListener("click", async (event) => {
   if (appUpdateActionBusy || !describeAppUpdate(appUpdateStatus).canInstall || !store.appUpdate) return;
   const version = store.appUpdate.latestVersion;
   const confirmed = await confirmAction({
-    title: `安装 RouteDeck ${version}`,
-    message: "安装包已通过签名和 SHA-256 校验。继续后将暂时停止代理并重启 RouteDeck，正在进行的 Codex 对话、下载等连接可能中断。确认现在安装吗？",
+    title: `安装 Serylane ${version}`,
+    message: "安装包已通过签名和 SHA-256 校验，安装名称暂保留 RouteDeck 以兼容旧版更新。继续后将暂时停止代理并重启 Serylane，正在进行的 Codex 对话、下载等连接可能中断。确认现在安装吗？",
     confirmLabel: "确认安装并重启",
     returnFocus: event.currentTarget as HTMLElement,
   });

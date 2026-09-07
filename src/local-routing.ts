@@ -60,7 +60,7 @@ export const localRoutingMarkup = `
           <div class="local-route-field"><label for="local-route-upstream">官方入口</label><div class="local-route-select"><select id="local-route-upstream" aria-describedby="local-route-upstream-error"><option value="chatgpt">ChatGPT 登录</option><option value="openai_api">OpenAI API Key</option></select>${selectChevron}</div><p class="local-route-field-error" id="local-route-upstream-error" hidden></p></div>
         </div>
         <div class="local-route-field"><label for="local-route-proxy">出站代理（可选）</label>
-          <input id="local-route-proxy" type="text" placeholder="留空使用 RouteDeck 本地代理" autocomplete="off" spellcheck="false" aria-describedby="local-route-proxy-help local-route-proxy-error" />
+          <input id="local-route-proxy" type="text" placeholder="留空使用 Serylane 本地代理" autocomplete="off" spellcheck="false" aria-describedby="local-route-proxy-help local-route-proxy-error" />
           <p class="local-route-hint" id="local-route-proxy-help">仅本机 HTTP(S) / SOCKS5，无账号密码。</p><p class="local-route-field-error" id="local-route-proxy-error" hidden></p>
         </div>
       </fieldset><div class="local-route-actions"><button class="button button-primary" id="local-route-save" type="submit">保存设置</button><button class="button button-quiet" id="local-route-reset" type="button">撤销编辑</button></div></form>
@@ -88,8 +88,8 @@ export const localRoutingMarkup = `
       <div class="local-route-evidence"><p>${infoIcon}<span>API 可达不等于模型流已验证</span></p><p>${infoIcon}<span id="local-route-evidence-message">无模型样本，不代表连接已验证。</span></p></div>
       <details class="local-route-help"><summary>使用与恢复说明<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
         <div class="local-route-help-content">
-          <section><h3>使用边界</h3><p>默认关闭。仅转发 Codex 模型 API，不接管整个应用，不修改系统代理，不关闭运行中的程序。关窗后留在托盘；退出 RouteDeck 会尝试恢复原配置，下次需再次接入。</p><p>切换出口无法续接已经中断的数据流；兼容模式也不保证永不断线。</p></section>
-          <section><h3>连接方式与接入</h3><p>兼容模式减少对 WebSocket 的依赖，但仍需要稳定出口；部分实时能力需在新会话验证。原生模式透传 WebSocket，不声称已验证模型完成。</p><p>出站代理留空时使用 RouteDeck 当前代理端口。指定其他代理时，不将流异常归因给 RouteDeck 节点。API Key 模式仍使用 Codex 自己的登录配置。</p><p>修改连接方式前，请先恢复 Codex 接入并关闭路由。接入不会迁移正在进行的请求。恢复后若原入口是 CC Switch，仍需开启其服务。</p></section>
+          <section><h3>使用边界</h3><p>默认关闭。仅转发 Codex 模型 API，不接管整个应用，不修改系统代理，不关闭运行中的程序。关窗后留在托盘；退出 Serylane 会尝试恢复原配置，下次需再次接入。</p><p>切换出口无法续接已经中断的数据流；兼容模式也不保证永不断线。</p></section>
+          <section><h3>连接方式与接入</h3><p>兼容模式减少对 WebSocket 的依赖，但仍需要稳定出口；部分实时能力需在新会话验证。原生模式透传 WebSocket，不声称已验证模型完成。</p><p>出站代理留空时使用 Serylane 当前代理端口。指定其他代理时，不将流异常归因给 Serylane 节点。API Key 模式仍使用 Codex 自己的登录配置。</p><p>修改连接方式前，请先恢复 Codex 接入并关闭路由。接入不会迁移正在进行的请求。恢复后若原入口是 CC Switch，仍需开启其服务。</p></section>
           <section><h3>稳定灾备与模型验证</h3><p>按最近 15 分钟样本评分，模型流权重高于基础检测。健康节点保持使用；连续失败后冷却 5 分钟，恢复需连续 3 次检查通过。只改变后续新连接，不清空正常连接、不自动重发模型请求。</p><p>基础检测每分钟执行；预期 401 仅表示 API 可达。模型样本来自兼容路由，需核对实际连接出口且期间托管节点未变化。无法确认出口时仅统计请求异常，不归因节点；取消请求和关闭原生隧道不等同于节点故障。</p></section>
         </div>
       </details>
@@ -153,7 +153,7 @@ export function mountLocalRouting(root: HTMLElement, services: Services) {
     $("status").textContent = state.running ? (state.settings.mode === "compatible" ? "运行中 · HTTP 流式" : "运行中 · WebSocket") : state.enabled ? "启动失败 · 可重试" : "已关闭";
     $("status").dataset.state = state.running ? "running" : state.enabled ? "error" : "off";
     $("endpoint").textContent = state.endpoint; $("provider").textContent = state.codex.provider;
-    $("binding").textContent = state.codex.attached ? "已写入 RouteDeck 接入配置" : state.codex.hasBackup ? "未接入或配置已变化" : "未接入";
+    $("binding").textContent = state.codex.attached ? "已写入 Serylane 接入配置" : state.codex.hasBackup ? "未接入或配置已变化" : "未接入";
     $("codex-endpoint").textContent = state.codex.endpoint ?? "官方默认入口";
     $("binding-help").textContent = state.active > 0 ? "仍有进行中的请求，请等待结束后更改接入；未中断请求。" : state.codex.attached ? "接入配置已写入；尚未验证新会话是否生效。" : state.codex.hasBackup ? "存在接入备份，请先恢复原配置。" : state.running ? "路由已启动，接入 Codex 需要单独确认。" : "先启动路由，再单独确认接入。";
     optionalText("binding-warning", state.codex.warning ?? "");
@@ -210,7 +210,7 @@ export function mountLocalRouting(root: HTMLElement, services: Services) {
     if (!state || $<HTMLInputElement>("enabled").disabled) { render(); return; }
     const before = state, enabled = $<HTMLInputElement>("enabled").checked;
     void operation(async () => {
-      if (!await services.confirm({ title: enabled ? "启动本地路由？" : "关闭路由并恢复接入？", message: enabled ? "仅监听本机端口，不会自动修改 Codex 配置。启用后随 RouteDeck 启动。" : "先恢复由 RouteDeck 管理的 Codex 配置，再停止服务。有进行中请求时将拒绝关闭。原配置如果依赖 CC Switch，需要其服务保持运行。", confirmLabel: enabled ? "启动路由" : "恢复并关闭", returnFocus: $("enabled") })) return;
+      if (!await services.confirm({ title: enabled ? "启动本地路由？" : "关闭路由并恢复接入？", message: enabled ? "仅监听本机端口，不会自动修改 Codex 配置。启用后随 Serylane 启动。" : "先恢复由 Serylane 管理的 Codex 配置，再停止服务。有进行中请求时将拒绝关闭。原配置如果依赖 CC Switch，需要其服务保持运行。", confirmLabel: enabled ? "启动路由" : "恢复并关闭", returnFocus: $("enabled") })) return;
       pending(enabled ? "正在启动路由…" : "正在恢复并关闭…");
       state = await services.api.setLocalRouteEnabled(enabled,before.revision,true); if (!dirty) fill();
       message(enabled ? "路由已启动。接入 Codex 需要下面单独确认。" : "路由已关闭，原接入配置已恢复。");
@@ -219,7 +219,7 @@ export function mountLocalRouting(root: HTMLElement, services: Services) {
   for (const [id,attach] of [["attach",true],["restore",false]] as const) $(id).addEventListener("click", () => {
     if (!state || $<HTMLButtonElement>(id).disabled) return; const before = state;
     void operation(async () => {
-      if (!await services.confirm({ title: attach ? "备份并接入 Codex？" : "恢复原 Codex 接入？", message: attach ? "备份用户级 config.toml，仅更改模型提供方接入。保留官方登录和其他设置，不退出 Codex。请在新会话核对，必要时自行重启；部分实时能力需验证。" : "只还原 RouteDeck 管理的字段，保留其余编辑；遇到其他路由程序修改将停止恢复。原 CC Switch 接入需要其服务开启。", confirmLabel: attach ? "备份并接入" : "恢复原配置", returnFocus: $(id) })) return;
+      if (!await services.confirm({ title: attach ? "备份并接入 Codex？" : "恢复原 Codex 接入？", message: attach ? "备份用户级 config.toml，仅更改模型提供方接入。保留官方登录和其他设置，不退出 Codex。请在新会话核对，必要时自行重启；部分实时能力需验证。" : "只还原 Serylane 管理的字段，保留其余编辑；遇到其他路由程序修改将停止恢复。原 CC Switch 接入需要其服务开启。", confirmLabel: attach ? "备份并接入" : "恢复原配置", returnFocus: $(id) })) return;
       pending(attach ? "正在备份并接入…" : "正在恢复配置…");
       state = await services.api.setCodexRoute(attach,before.codex.configRevision,true);
       message(attach ? "接入配置已写入；尚未验证新会话是否生效。" : "已恢复原接入配置，历史备份仍保留。");

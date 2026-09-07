@@ -1,10 +1,10 @@
-# RouteDeck — 开源 Mihomo 桌面代理客户端
+# Serylane — 开源 Mihomo 桌面代理客户端
 
-RouteDeck 是基于 **Mihomo** 内核、使用 Rust + Tauri 2 构建的开源桌面代理客户端，面向 Windows、macOS 和 Linux。通过中文界面管理 Clash Meta / Mihomo YAML 订阅、节点、分流规则和系统代理，并提供默认关闭的 Codex 本地兼容路由。
+Serylane 是基于 **Mihomo** 内核、使用 Rust + Tauri 2 构建的开源桌面代理客户端，面向 Windows、macOS 和 Linux。通过中文界面管理 Clash Meta / Mihomo YAML 订阅、节点、分流规则和系统代理，并提供默认关闭的 Codex 本地兼容路由。
 
-**RouteDeck is an open-source Mihomo desktop proxy client for Windows, macOS, and Linux.** Built with Rust and Tauri 2, it provides subscription management, proxy selection, traffic rules, system proxy controls, and optional local routing for Codex. The local router is off by default; Windows TUN support is experimental.
+**Serylane (formerly RouteDeck) is an open-source Mihomo desktop proxy client for Windows, macOS, and Linux.** Built with Rust and Tauri 2, it provides subscription management, proxy selection, traffic rules, system proxy controls, and optional local routing for Codex. The local router is off by default; Windows TUN support is experimental.
 
-这是独立客户端项目，并非 Mihomo、Clash 或 OpenAI 的官方产品。项目原名 `mihomo-codex`，从 0.6.0 开始使用 RouteDeck 品牌。
+这是独立客户端项目，并非 Mihomo、Clash 或 OpenAI 的官方产品。项目曾用名 `mihomo-codex`、RouteDeck，从 0.7.4 起使用 Serylane 展示品牌。为兼容已安装版本，安装名称暂保留 `RouteDeck`，仓库、主程序与更新包地址保持不变；详见下方「更名与升级兼容」。
 
 ## 主要功能
 
@@ -17,9 +17,10 @@ RouteDeck 是基于 **Mihomo** 内核、使用 Rust + Tauri 2 构建的开源桌
 
 ## 源码与下载
 
+- 官网：[Serylane](https://serylane.cmmuu.com)（本轮部署中，访问状态以上线验收为准）。
 - 源码仓库：[GitHub](https://github.com/CMMUU/routedeck) · [Gitee](https://gitee.com/cmmuu/routedeck)
 - 版本发布：[GitHub Releases](https://github.com/CMMUU/routedeck/releases) · [Gitee Releases](https://gitee.com/cmmuu/routedeck/releases)
-- 当前源码版本为 **0.7.3**，包含磨砂玻璃界面、订阅流量卡片和可选本地路由；见 [v0.7.3 发布说明](docs/发布说明-v0.7.3.md)。源码版本不表示对应安装包已公开发布，正式可用版本以两渠道实际 Release 与更新清单为准。
+- 当前源码版本为 **0.7.4**，采用 Serylane 展示品牌，保留磨砂玻璃界面、订阅流量卡片和可选本地路由；见 [v0.7.4 发布说明](docs/发布说明-v0.7.4.md)。源码版本不表示对应安装包已公开发布，正式可用版本以两渠道实际 Release 与更新清单为准。
 - 安装包、SHA-256 校验文件和更新签名以 Release 页面实际附件为准；应用内自动更新同版本优先 Gitee，GitHub 备用。历史版本附件文件名保持不变。
 - Windows 10/11 TUN 为实验性功能，已实现管理员会话运行方式，尚未完成真实 TUN 路由与恢复验收。各平台的安装、构建和网络接管验证范围见 [v0.5.0 发布说明](docs/发布说明-v0.5.0.md)。
 - 自 2026-09-04 起，应用源码按 [GNU GPL v3（GPL-3.0-only）](LICENSE) 开源。第三方依赖沿用各自许可证，见 [第三方声明](THIRD_PARTY_NOTICES.md)、[v0.5.0 许可证清单](docs/compliance/v0.5.0/license-inventory.md) 和 [SBOM](docs/compliance/v0.5.0/sbom.cdx.json)。`package.json` 中的 `private: true` 仅防止意外发布到 npm，不限制源码访问或 GPL 授予的权利。
@@ -33,6 +34,7 @@ RouteDeck 是基于 **Mihomo** 内核、使用 Rust + Tauri 2 构建的开源桌
 
 ## 设计文档
 
+- [v0.7.4 发布说明（Serylane 品牌与升级兼容）](docs/发布说明-v0.7.4.md)
 - [v0.7.3 发布说明（玻璃界面、订阅流量与可选路由）](docs/发布说明-v0.7.3.md)
 - [软件设计说明书（SDD）](docs/软件设计说明书.md)
 - [架构与里程碑](docs/架构与里程碑.md)
@@ -94,10 +96,10 @@ RouteDeck 是基于 **Mihomo** 内核、使用 Rust + Tauri 2 构建的开源桌
 这些说明对应当前源码功能，不表示对应安装包已经发布。
 
 1. 在「代理」生成 OpenAI 灾备后，在「路由 → OpenAI 稳定灾备」启用稳定策略。已有配置不会因升级自动改变策略；新生成的灾备采用稳定策略。
-2. 「路由」默认关闭。选择兼容模式（HTTP/SSE）或原生模式（WebSocket）、官方入口与出站代理后保存；留空出站代理表示使用 RouteDeck 当前本地代理端口。
+2. 「路由」默认关闭。选择兼容模式（HTTP/SSE）或原生模式（WebSocket）、官方入口与出站代理后保存；留空出站代理表示使用 Serylane 当前本地代理端口。
 3. 「启用路由」只启动本机服务，不改 Codex。再单独确认「接入 Codex」，备份用户级 config.toml 后仅写入模型提供方接入，不修改 auth.json、系统代理，也不关闭 Codex。
 4. 在新 Codex 会话核对是否生效；必要时在方便时自行重启 Codex。正在进行的请求不会被迁移。Codex profile 或其他程序可能覆盖接入设置。
-5. 「恢复原配置」保留其他设置编辑；遇到其他路由程序修改同一字段时拒绝覆盖。备份保留在页面显示的位置。关闭路由先恢复接入，有进行中请求则拒绝关闭；退出 RouteDeck 会尝试恢复，重新启动后需再次接入。原接入若是 CC Switch，恢复后仍依赖其服务。
+5. 「恢复原配置」保留其他设置编辑；遇到其他路由程序修改同一字段时拒绝覆盖。备份保留在页面显示的位置。关闭路由先恢复接入，有进行中请求则拒绝关闭；正常退出 Serylane 会尝试恢复，下次使用请核对并按需重新接入。服务启用状态会保留，异常退出后以页面的接入与恢复提示为准。原接入若是 CC Switch，恢复后仍依赖其服务。
 
 稳定策略每分钟检查基础 API 连通性，以最近 15 分钟的加权结果选后备节点。模型流样本权重更高；当前健康节点不因其他节点测速更快而切换。连续失败后冷却 5 分钟，再连续 3 次恢复检查通过才可成为后备候选；正常节点恢复不触发立即切回。历史统计保存在本次运行内存中，配置版本变化或重启后重新观察。
 
@@ -109,13 +111,16 @@ RouteDeck 是基于 **Mihomo** 内核、使用 Rust + Tauri 2 构建的开源桌
 
 ## 更名与升级兼容
 
-- 从 0.6.0 起，应用、窗口和托盘显示名为 `RouteDeck`，项目／仓库、npm／Cargo 包和主可执行文件使用 `routedeck`（Windows 为 `routedeck.exe`）。0.3.1–0.5.0 的名称为 `mihomo-codex`。
+- **0.7.4 是展示品牌更名，不是重新安装一款不同应用。** 窗口、托盘与应用内名称改为 `Serylane`；Tauri `productName` 仍为 `RouteDeck`，主程序仍为 `routedeck.exe`（Windows），安装器、系统卸载列表和登录启动项可能仍显示 RouteDeck。这是有意保留的兼容名称，不是下载了错误软件。
+- GitHub/Gitee 仓库、`latest.json`／`latest-gitee.json` 更新入口、`RouteDeck_…` 包名与更新签名公钥均不因展示名改变；继续同版本国内优先、GitHub 备用。旧客户端会严格校验包名及来源，不能仅为统一品牌替换这些地址。历史包、签名和标签保持不变。
+- Codex 接入的 `routedeck` 提供方标识、lease 与备份格式保持不变；不会为更名扫描或重写已有 Codex 配置，不改变路由默认关闭及独立接入流程。
+- 0.6.0–0.7.3 的展示名称为 `RouteDeck`；项目／仓库、npm／Cargo 包继续使用 `routedeck`。0.3.1–0.5.0 的名称为 `mihomo-codex`。
 - 保留 `com.cmmuu.mihomodesktop` bundle identifier 及其原用户数据目录，不因品牌更名迁移或重置订阅、设置和历史版本。
 - 保留 `mihomo-tun-helper` 可执行文件和 `com.cmmuu.mihomodesktop.tun-helper` 服务／plist 标识；helper 对主程序的查找随新二进制名更新。
 - 规则导出与导入继续使用 `# mihomo-codex-rule:` 元数据前缀，以兼容旧版导出的启停、备注和排序数据。
-- 保留上述兼容身份不等于已完成所有安装器与启动项迁移验收。升级前退出旧应用并备份数据；不要同时运行旧版与 RouteDeck，或同时开启多个客户端的系统代理／TUN。各平台覆盖安装、快捷方式、登录启动项及 helper 授权需单独验证。
-- Windows NSIS 的卸载项以 `productName` 为键，`RouteDeck` 与旧 `mihomo-codex` 不同，不能仅凭 bundle identifier 保证自动覆盖升级。建议先关闭旧版登录启动并退出，备份配置，卸载旧版时不要选择删除应用数据，再安装 RouteDeck；确认数据正常后按需重新启用登录启动。
-- Linux DEB／RPM 的内部包名由显示名称转换为 `route-deck`，不同于旧 `mihomo-codex`，也不同于主程序名 `routedeck`。先卸载旧包并保留用户配置，再安装新包，以免共享文件路径冲突。macOS 已安装的旧 TUN helper 可能仍按旧主程序名查找，升级后如不可用需重新安装／修复 helper 并验证授权。
+- 保留上述兼容身份不等于已完成所有安装器与启动项迁移验收。升级前备份数据，在方便结束重要连接时确认安装；不要同时运行旧版与 Serylane，或同时开启多个客户端的系统代理／TUN。各平台覆盖安装、快捷方式、登录启动项及 helper 授权需单独验证。
+- 以下注意事项仅针对从 **0.3.1–0.5.0 `mihomo-codex`** 迁移，不是要求现有 RouteDeck 用户为 0.7.4 更名先卸载。Windows NSIS 的卸载项以 `productName` 为键，`RouteDeck` 与旧 `mihomo-codex` 不同，不能仅凭 bundle identifier 保证自动覆盖升级。旧 `mihomo-codex` 用户应先关闭旧版登录启动并退出，备份配置，卸载旧版时不要选择删除应用数据，再安装现有客户端；确认数据正常后按需重新启用登录启动。
+- Linux DEB／RPM 的内部包名继续为 `route-deck`，不同于旧 `mihomo-codex`，也不同于主程序名 `routedeck`。从旧 `mihomo-codex` 包迁移时先卸载旧包并保留用户配置，再安装现有包，以免共享文件路径冲突。macOS 从旧 `mihomo-codex` 迁移时，已安装的旧 TUN helper 可能仍按旧主程序名查找，如不可用需重新安装／修复 helper 并验证授权；0.7.4 不改变当前 helper 标识或主程序名。
 - 历史验证记录与 Figma 原始证据仍保留旧名称；更名不代表重新完成所有平台网络验收。
 - 发布前运行 `npm run test:branding`，检查构建名称与兼容身份一致性。
 

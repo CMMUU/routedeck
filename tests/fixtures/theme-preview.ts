@@ -568,7 +568,7 @@ function settings(): AppSettings {
 }
 
 const readonlyReplies: Record<string, () => unknown> = {
-  app_info: () => ({ productName: "RouteDeck", version: `${packageInfo.version} · 合成预览`, targetOs: previewWindows ? "windows" : "macos", targetArch: previewWindows ? "x86_64" : "aarch64" }),
+  app_info: () => ({ productName: "Serylane", version: `${packageInfo.version} · 合成预览`, targetOs: previewWindows ? "windows" : "macos", targetArch: previewWindows ? "x86_64" : "aarch64" }),
   app_update_status: () => structuredClone(fixtureUpdate),
   get_settings: settings,
   get_user_rules: userRulesState,
@@ -712,7 +712,7 @@ mockIPC(async (command, payload) => {
       if (!route.running || route.codex.hasBackup) throw routeError("STATE_CONFLICT", "请先单独启动路由，已有接入备份时不能重复接入。");
       attachFixtureRoute();
     } else {
-      if (!route.codex.hasBackup) throw routeError("STATE_CONFLICT", "没有 RouteDeck 接入备份可恢复。");
+      if (!route.codex.hasBackup) throw routeError("STATE_CONFLICT", "没有 Serylane 接入备份可恢复。");
       restoreFixtureRoute();
     }
     reportRoute(); return structuredClone(route);

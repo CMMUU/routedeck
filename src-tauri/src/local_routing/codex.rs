@@ -120,7 +120,7 @@ pub fn status(config: &Path, dir: &Path) -> AppResult<CodexStatus> {
         l.config_path == config && parse(&Some(l.installed.clone())).is_ok_and(|i| owns(&doc, &i))
     });
     let warning = if lease.is_some() && !attached {
-        Some("配置已被其他程序修改；RouteDeck 不会覆盖冲突字段。请查看备份后恢复。".into())
+        Some("配置已被其他程序修改；Serylane 不会覆盖冲突字段。请查看备份后恢复。".into())
     } else if doc.contains_key("profile") {
         Some("检测到 Codex profile；其设置可能覆盖当前接入，请在新会话核对实际连接。".into())
     } else if provider.contains("cc-switch") {
@@ -157,7 +157,7 @@ pub fn attach(config: &Path, dir: &Path, route: &RouteDocument, expected: &str) 
         || doc.get("model_provider").and_then(Item::as_str) == Some(PROVIDER)
     {
         return Err(AppError::Conflict(
-            "Codex 已有同名 routedeck 提供方，未覆盖".into(),
+            "Codex 已有同名提供方（兼容标识 routedeck），未覆盖".into(),
         ));
     }
     if doc.get("model_providers").is_some_and(|v| !v.is_table()) {
@@ -166,7 +166,9 @@ pub fn attach(config: &Path, dir: &Path, route: &RouteDocument, expected: &str) 
         ));
     }
     let mut provider = Table::new();
-    provider["name"] = value("RouteDeck 本地路由");
+    // Display only: existing leases retain their exact installed provider table.
+    // Keep PROVIDER and the restore comparison stable across brand changes.
+    provider["name"] = value("Serylane 本地路由");
     provider["base_url"] = value(route.endpoint());
     provider["wire_api"] = value("responses");
     provider["requires_openai_auth"] = value(true);
@@ -282,6 +284,52 @@ mod tests {
         assert!(result.contains("# my comment"));
         assert!(result.contains("changed-model"));
         assert!(!result.contains("routedeck"));
+        assert_eq!(
+            std::fs::read_to_string(root.path().join("auth.json")).unwrap(),
+            "unchanged-test-auth"
+        );
+    }
+    #[test]
+    fn serylane_recognizes_and_restores_a_routedeck_073_lease() {
+        let (root, config, dir) = fixture("# original\nmodel = \"sample\"\n");
+        let original = std::fs::read_to_string(&config).unwrap();
+        attach(
+            &config,
+            &dir,
+            &RouteDocument::default(),
+            &status(&config, &dir).unwrap().config_revision,
+        )
+        .unwrap();
+        let attached = std::fs::read_to_string(&config).unwrap();
+        assert!(attached.contains("model_provider = \"routedeck\""));
+        assert!(attached.contains("name = \"Serylane 本地路由\""));
+
+        // Recreate the previous release's display name inside an isolated lease;
+        // the new application must read it without migrating config or journal.
+        let legacy = attached.replace("Serylane 本地路由", "RouteDeck 本地路由");
+        let mut lease = read_lease(&dir).unwrap().unwrap();
+        lease.installed = legacy.clone();
+        let journal = serde_json::to_string(&lease).unwrap();
+        std::fs::write(&config, &legacy).unwrap();
+        std::fs::write(dir.join("codex-lease.json"), &journal).unwrap();
+        assert!(status(&config, &dir).unwrap().attached);
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), legacy);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("codex-lease.json")).unwrap(),
+            journal
+        );
+
+        // A third-party edit remains a conflict, even when only the name changes.
+        let changed = legacy.replace("RouteDeck 本地路由", "another router");
+        std::fs::write(&config, &changed).unwrap();
+        assert!(restore(&config, &dir, None).is_err());
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), changed);
+        assert!(has_lease(&dir).unwrap());
+
+        std::fs::write(&config, &legacy).unwrap();
+        restore(&config, &dir, None).unwrap();
+        assert_eq!(std::fs::read_to_string(&config).unwrap(), original);
+        assert!(dir.join(lease.backup_name).is_file());
         assert_eq!(
             std::fs::read_to_string(root.path().join("auth.json")).unwrap(),
             "unchanged-test-auth"

@@ -511,6 +511,22 @@ class SyncTests(unittest.TestCase):
             job.sync_release(source, job.work / "fixture.git")
         self.assertEqual(ge.writes, [])
 
+    def test_mirror_preserves_source_brand_for_new_and_historical_releases(self):
+        for tag, brand in (("v0.7.3", "RouteDeck"), ("v0.7.4", "Serylane")):
+            for existing in (False, True):
+                with self.subTest(tag=tag, existing=existing):
+                    body = f"# {brand} {tag}\n\nInstaller identity remains RouteDeck.\n"
+                    job, ge, source = self.release_metadata_job(body, body if existing else None)
+                    source.update({"tag_name": tag, "name": f"{brand} {tag}"})
+                    if existing:
+                        ge.release.update({"tag_name": tag, "name": source["name"]})
+                    with patch.object(sync, "git_run", return_value="a" * 40), patch("builtins.print"):
+                        job.sync_release(source, job.work / "fixture.git")
+                        job.sync_release(source, job.work / "fixture.git")
+                    self.assertEqual(ge.release["name"], f"{brand} {tag}")
+                    self.assertEqual(ge.release["body"], body)
+                    self.assertEqual([method for method, _ in ge.writes], [] if existing else ["POST"])
+
     def test_crlf_api_read_back_accepts_create_and_patch_without_changing_source_body(self):
         for existing, method in ((None, "POST"), ("Old release notes", "PATCH")):
             for body in ("First line  \nSecond line\n", "First line  \r\nSecond line\r\n"):

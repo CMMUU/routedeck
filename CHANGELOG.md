@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.4 - Unreleased
+
+- Adopt Serylane as the desktop display brand, including the window, tray, interface and safety prompts. Keep the Chinese functional subtitle and the RouteDeck name in explicit installer-compatibility explanations.
+- Use the new transparent blue S mark for desktop and sidebar icons, generated from the approved image with the official Tauri icon CLI; retain the previous source artwork for provenance.
+- Retain the RouteDeck installer/product identity, routedeck executable and package names, application identifier, data directories, helper identity, Codex provider/lease format, updater endpoints, artifact filenames and existing update verification key.
+- Separate display branding from compatibility contracts in automated checks. Do not migrate active application, proxy or Codex configuration as part of the rename.
+- Introduce the Serylane website address and preserve references to former names. Publication, website availability and real-network acceptance remain separate checks; no uninterrupted-connectivity guarantee is made.
+
 ## 0.7.3 - 2026-09-07
 
 - Apply the approved frosted-glass design across the desktop shell, readable subscription cards, dark themes and narrow layouts, with keyboard and reduced-transparency fallbacks.

@@ -33,6 +33,16 @@ def sha256(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def release_title(tag):
+    match = re.fullmatch(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", tag)
+    if not match:
+        raise ReleaseError("Release title requires an exact stable version tag")
+    # Display-only transition. Old tags keep their default title, while already
+    # published releases below are never patched, regardless of their branding.
+    brand = "Serylane" if tuple(map(int, match.groups())) >= (0, 7, 4) else "RouteDeck"
+    return f"{brand} {tag}"
+
+
 def package_names(version):
     # Tauri CLI 2.11.4 uses productName, not mainBinaryName, for bundle filenames.
     # Linux package metadata is kebab-cased separately; filenames retain the brand.
@@ -276,13 +286,14 @@ def verify_asset(api, remote, path):
 
 
 def publish(api, tag, commit, assets, notes):
+    title = release_title(tag)
     verify_tag(api, tag, commit)
     endpoint = f"/repos/{REPOSITORY}/releases"
     releases = [release for release in api.pages(endpoint) if release.get("tag_name") == tag]
     if len(releases) > 1:
         raise ReleaseError("More than one release exists for the tag")
     release = releases[0] if releases else api.api(endpoint, "POST", {
-        "tag_name": tag, "target_commitish": commit, "name": f"RouteDeck {tag}",
+        "tag_name": tag, "target_commitish": commit, "name": title,
         "body": notes, "draft": True, "prerelease": False,
     })
     if release.get("tag_name") != tag or release.get("prerelease"):
@@ -313,13 +324,13 @@ def publish(api, tag, commit, assets, notes):
     verify_tag(api, tag, commit)
     if release.get("draft"):
         api.api(f"{endpoint}/{release_id}", "PATCH", {
-            "name": f"RouteDeck {tag}", "body": notes,
+            "name": title, "body": notes,
             "draft": False, "make_latest": "legacy",
         })
     confirmed = api.api(f"{endpoint}/{release_id}")
     if confirmed.get("draft") is not False or confirmed.get("tag_name") != tag:
         raise ReleaseError("GitHub did not confirm release publication")
-    if release.get("draft") and (confirmed.get("name") != f"RouteDeck {tag}" or confirmed.get("body") != notes):
+    if release.get("draft") and (confirmed.get("name") != title or confirmed.get("body") != notes):
         raise ReleaseError("GitHub did not confirm the reviewed release title and notes")
     print(f"Published and verified {tag}: {len(assets)} assets")
 

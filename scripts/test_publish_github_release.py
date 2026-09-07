@@ -9,7 +9,7 @@ import unittest
 from generate_compliance import (INPUT_PATHS, cargo_components, core_component,
                                  markdown as compliance_markdown, npm_components)
 from publish_github_release import (ReleaseError, collect_packages, package_names,
-                                    prepare_assets, publish, sha256, validate_version,
+                                    prepare_assets, publish, release_title, sha256, validate_version,
                                     validate_compliance)
 
 
@@ -246,6 +246,50 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(payload["body"], notes)
         self.assertEqual(api.release["name"], f"RouteDeck {TAG}")
         self.assertEqual(api.release["body"], notes)
+
+    def test_brand_transition_changes_titles_but_keeps_installer_names(self):
+        self.assertEqual(release_title("v0.7.3"), "RouteDeck v0.7.3")
+        for version in ("0.7.4", "0.8.0", "0.10.0", "1.0.0"):
+            self.assertEqual(release_title(f"v{version}"), f"Serylane v{version}")
+            self.assertEqual(package_names(version), {
+                platform: [name.replace("0.7.3", version) for name in names]
+                for platform, names in package_names("0.7.3").items()
+            })
+        for invalid in ("v0.7.04", "0.7.4", "v0.7.4-beta.1", "latest"):
+            with self.assertRaisesRegex(ReleaseError, "stable version tag"):
+                release_title(invalid)
+
+    def test_new_release_and_placeholder_draft_use_serylane_title_without_rewriting_notes(self):
+        asset = self.base / "RouteDeck_0.7.4_x64-setup.exe"
+        asset.write_bytes(b"synthetic updater fixture; never executed")
+        notes = "# Serylane v0.7.4\n\nInstallation identity remains RouteDeck.\n"
+        for existing in (False, True):
+            with self.subTest(existing_draft=existing):
+                api = FakeGitHub()
+                if existing:
+                    api.release = {"id": 1, "tag_name": "v0.7.4", "draft": True,
+                                   "prerelease": False, "name": "RouteDeck draft", "body": "TODO"}
+                publish(api, "v0.7.4", COMMIT, [asset], notes)
+                self.assertEqual(api.release["name"], "Serylane v0.7.4")
+                self.assertEqual(api.release["body"], notes)
+                self.assertEqual(api.uploads, ["RouteDeck_0.7.4_x64-setup.exe"])
+                self.assertTrue(all(data["name"] == "Serylane v0.7.4" for _, data in api.writes))
+
+    def test_published_titles_and_notes_are_not_rebranded_even_after_transition(self):
+        asset = self.base / "retained-package.zip"
+        asset.write_bytes(b"historical package fixture")
+        for tag in ("v0.7.3", "v0.7.4"):
+            with self.subTest(tag=tag):
+                api = FakeGitHub()
+                original = {"id": 1, "tag_name": tag, "draft": False, "prerelease": False,
+                            "name": f"RouteDeck {tag}", "body": "Original RouteDeck notes"}
+                api.release = original.copy()
+                api.upload(1, asset)
+                api.uploads.clear()
+                publish(api, tag, COMMIT, [asset], "Serylane replacement notes must not be written")
+                self.assertEqual(api.release, original)
+                self.assertEqual(api.writes, [])
+                self.assertEqual(api.uploads, [])
 
     def test_upload_failure_leaves_draft_and_retry_resumes(self):
         assets, notes = self.prepare()

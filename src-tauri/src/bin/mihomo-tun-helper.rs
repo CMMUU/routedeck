@@ -5,7 +5,7 @@ fn main() {
 
 #[cfg(windows)]
 fn main() {
-    eprintln!("Windows TUN runs inside the elevated RouteDeck application session. No TUN helper service is installed; quit the app from its tray menu and choose Run as administrator.");
+    eprintln!("Windows TUN runs inside the elevated Serylane application session. No TUN helper service is installed; quit the app from its tray menu and choose Run as administrator.");
     std::process::exit(1);
 }
 

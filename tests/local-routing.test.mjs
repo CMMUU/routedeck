@@ -214,7 +214,7 @@ test("switch waits for confirmation and operation result, then Codex attach is s
   assert.equal(h.confirmations[1].title,"备份并接入 Codex？");
   assert.match(h.confirmations[1].message,/不退出 Codex/);
   assert.deepEqual(h.calls.at(-1),["codex",true,"config-1",true]);
-  assert.equal(h.control("binding").textContent,"已写入 RouteDeck 接入配置");
+  assert.equal(h.control("binding").textContent,"已写入 Serylane 接入配置");
   assert.match(h.control("feedback").textContent,/尚未验证新会话是否生效/);
   assert.equal(h.control("attach").disabled,true);
   assert.equal(h.control("restore").disabled,false);
@@ -232,7 +232,7 @@ test("existing or conflicting backup locks settings and duplicate attach; restor
   assert.equal(h.confirmations.length,0);
   h.failures.set("codex",new Error("Codex 接入已被其他程序修改，未覆盖；原始备份仍保留"));
   h.fire("restore","click"); await h.settle();
-  assert.match(h.confirmations[0].message,/只还原 RouteDeck 管理的字段/);
+  assert.match(h.confirmations[0].message,/只还原 Serylane 管理的字段/);
   assert.equal(h.snapshot.running,true);
   assert.equal(h.control("enabled").checked,true);
   assert.equal(h.control("backup").hidden,false);

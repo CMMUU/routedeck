@@ -428,12 +428,12 @@ pub async fn launch_proxy_program(
         let _permit = crate::user_rules::acquire_configuration(&app)?;
         let storage = AppStorage::from_app(&app)?;
         if app.state::<MihomoRuntime>().status(Some(&app)).phase != RuntimePhase::Running {
-            return Err(AppError::Conflict("请先启动 RouteDeck 的 Mihomo 核心；无需开启系统代理或 TUN".into()));
+            return Err(AppError::Conflict("请先启动 Serylane 的 Mihomo 核心；无需开启系统代理或 TUN".into()));
         }
         let manager = app.state::<ProgramProxyManager>();
         let mut children = manager.children.lock().map_err(|_| AppError::Conflict("程序管理器繁忙".into()))?;
         if children.get_mut(&program_id).is_some_and(|c| matches!(c.try_wait(), Ok(None))) {
-            return Err(AppError::Conflict("该程序已经通过 RouteDeck 启动，请先在程序内退出后再启动".into()));
+            return Err(AppError::Conflict("该程序已经通过 Serylane 启动，请先在程序内退出后再启动".into()));
         }
         let document = storage.programs()?;
         check_revision(&document, expected_revision)?;
@@ -441,12 +441,12 @@ pub async fn launch_proxy_program(
         let program = normalize_input(ProgramInput { id: Some(program.id), name: program.name, executable: program.executable, arguments: program.arguments, working_directory: program.working_directory, mode: program.mode })?;
         #[cfg(windows)]
         if let Some(pid) = running_program(&program.executable) {
-            return Err(AppError::Conflict(format!("该程序已有运行实例（PID {pid}）。为避免代理参数被旧实例忽略，请先自行退出该程序；RouteDeck 不会强制关闭它。")));
+            return Err(AppError::Conflict(format!("该程序已有运行实例（PID {pid}）。为避免代理参数被旧实例忽略，请先自行退出该程序；Serylane 不会强制关闭它。")));
         }
         let port = storage.settings()?.mixed_port;
         let endpoint = std::net::SocketAddr::from(([127, 0, 0, 1], port));
         std::net::TcpStream::connect_timeout(&endpoint, std::time::Duration::from_secs(2))
-            .map_err(|_| AppError::Runtime("RouteDeck 本地代理端口不可用，未启动程序".into()))?;
+            .map_err(|_| AppError::Runtime("Serylane 本地代理端口不可用，未启动程序".into()))?;
         let child = proxy_command(&program, port).spawn().map_err(|e| AppError::Runtime(format!("程序启动失败：{e}")))?;
         children.insert(program_id, child);
         snapshot(&app, &storage, &mut children)

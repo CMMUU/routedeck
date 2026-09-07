@@ -239,13 +239,13 @@ fn update_tray(app: &AppHandle, snapshot: &GlobalTrafficSnapshot) {
         if let Some(icon) = app.default_window_icon() {
             let _ = tray.set_icon_with_as_template(Some(icon.clone()), false);
         }
-        let _ = tray.set_tooltip(Some("RouteDeck"));
+        let _ = tray.set_tooltip(Some("Serylane"));
         return;
     }
 
     let upload = format_tray_rate(snapshot.upload_bytes_per_second);
     let download = format_tray_rate(snapshot.download_bytes_per_second);
-    let tooltip = format!("RouteDeck\n↑ {upload}\n↓ {download}");
+    let tooltip = format!("Serylane\n↑ {upload}\n↓ {download}");
     let _ = tray.set_tooltip(Some(tooltip));
 
     #[cfg(target_os = "macos")]

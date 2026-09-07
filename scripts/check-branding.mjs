@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,7 +7,9 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (path) => readFileSync(join(root, path), "utf8").replaceAll("\r\n", "\n");
 const json = (path) => JSON.parse(read(path));
-const displayName = "RouteDeck";
+const displayName = "Serylane";
+// Installer/product identity and signed asset names stay stable for installed clients.
+const installerName = "RouteDeck";
 const slug = "routedeck";
 const libraryName = "routedeck_lib";
 // These identifiers are compatibility contracts, not user-facing branding.
@@ -24,7 +27,7 @@ assert.equal(lock.name, slug);
 assert.equal(lock.packages[""].name, slug);
 assert.equal(lock.version, pkg.version);
 assert.equal(lock.packages[""].version, pkg.version);
-assert.equal(config.productName, displayName);
+assert.equal(config.productName, installerName);
 assert.equal(config.mainBinaryName, slug);
 assert.equal(config.version, pkg.version);
 assert.equal(config.identifier, identifier);
@@ -61,4 +64,23 @@ assert.ok(read("src-tauri/src/user_rules.rs").includes(`METADATA_PREFIX: &str = 
 assert.ok(read("src/rule-manager.ts").includes(ruleMetadataPrefix));
 assert.ok(read("tests/fixtures/theme-preview.ts").includes(ruleMetadataPrefix));
 
-console.log(`${displayName} ${pkg.version}: display brand, project slug, and retained compatibility identities match`);
+// Existing Codex leases, old updater clients and package managers must survive a
+// display-only rename. Do not broaden these exact identities to new-name aliases.
+assert.ok(read("src-tauri/src/local_routing/codex.rs").includes(`const PROVIDER: &str = "${slug}"`));
+assert.ok(read("src-tauri/src/local_routing/codex.rs").includes('"codex-lease.json"'));
+assert.ok(read("src-tauri/src/local_routing/codex.rs").includes(`provider["name"] = value("${displayName} 本地路由")`));
+const updater = read("src-tauri/src/app_update.rs");
+for (const endpoint of [
+  "https://github.com/CMMUU/routedeck/releases/latest/download/latest.json",
+  "https://gitee.com/api/v5/repos/cmmuu/routedeck/releases/latest",
+  "https://github.com/CMMUU/routedeck/releases",
+  "https://gitee.com/cmmuu/routedeck/releases",
+]) assert.ok(updater.includes(`"${endpoint}"`), `Retain updater endpoint: ${endpoint}`);
+assert.ok(updater.includes(`format!("${installerName}_{version}_{suffix}")`));
+assert.ok(updater.includes("if url.as_str() != expected"));
+assert.ok(read("scripts/updater_release.py").includes(`prefix = f"${installerName}_{version}"`));
+assert.ok(read("scripts/publish_github_release.py").includes(`prefix = f"${installerName}_{version}"`));
+assert.equal(createHash("sha256").update(config.plugins.updater.pubkey).digest("hex"),
+  "de516897f5cc1e06aab7fa1e822ce6f6db8ae95547c15b2b216d9c0391c52792", "Retain the existing signed-update verification key");
+
+console.log(`${displayName} ${pkg.version}: display brand matches; ${installerName} installer, update and data identities retained`);

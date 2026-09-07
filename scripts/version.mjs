@@ -40,5 +40,5 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const args = process.argv.slice(2);
   if (args[0] === "--set" && args.length === 2) setVersion(args[1]);
   else if (args.length && !(args[0] === "--tag" && args.length === 2)) throw new Error("Usage: node scripts/version.mjs [--set X.Y.Z | --tag vX.Y.Z]");
-  console.log(`RouteDeck ${verifyVersions(root, args[0] === "--tag" ? args[1] : undefined)}: all six version fields agree`);
+  console.log(`Serylane ${verifyVersions(root, args[0] === "--tag" ? args[1] : undefined)}: all six version fields agree`);
 }

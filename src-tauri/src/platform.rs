@@ -346,7 +346,7 @@ pub fn proxy_compatibility(port: u16) -> AppResult<ProxyCompatibility> {
         let detail = if compatible {
             "Windows 代理地址通过 HTTP/HTTPS 格式校验。目标应用仍可能受环境变量或内部代理设置影响；WebSocket 和长连接需实际验证。"
         } else if !system_configured {
-            "系统代理未使用 RouteDeck 的兼容格式，或已由其他程序接管。此检查不会更改设置。"
+            "系统代理未使用 Serylane 的兼容格式，或已由其他程序接管。此检查不会更改设置。"
         } else {
             "Windows 代理地址未通过 HTTP/HTTPS 格式校验；此检查不会修改系统设置。"
         };

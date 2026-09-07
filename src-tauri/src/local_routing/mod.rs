@@ -421,7 +421,7 @@ pub fn set_codex_route(
                 .as_ref()
                 .is_some_and(|s| s.stats.running.load(Ordering::Acquire))
             {
-                return Err(AppError::Conflict("请先启动 RouteDeck 路由服务".into()));
+                return Err(AppError::Conflict("请先启动 Serylane 路由服务".into()));
             }
             codex::attach(
                 &config,

@@ -16,7 +16,7 @@ export function suggestedProgramName(path: string): string {
 export function launchBlockReason(program: ProxyProgram, state: ProgramState): string | null {
   if (!state.supported) return "目前仅支持 Windows";
   if (!program.available) return "找不到程序文件，请编辑路径";
-  if (program.runningPid !== null) return "已由 RouteDeck 启动，请先自行退出程序";
+  if (program.runningPid !== null) return "已由 Serylane 启动，请先自行退出程序";
   if (!state.coreRunning) return "请先启动 Mihomo 核心";
   return null;
 }
@@ -30,7 +30,7 @@ export const programManagerMarkup = `
       <div><div class="section-label">PROGRAM PROXY</div><h2>程序代理</h2></div>
       <span class="control-state-pill">按需启动</span>
     </div>
-    <p class="program-lead">让指定程序单独使用 RouteDeck 的本地代理。</p>
+    <p class="program-lead">让指定程序单独使用 Serylane 的本地代理。</p>
     <p class="hint">仅影响从这里启动、且支持所选代理方式的程序及其子进程。不强制接管已运行的程序，不修改全局环境变量，也不会自动切换系统代理或 TUN。</p>
     <div class="program-connection"><span class="program-core-dot" id="program-core-dot" aria-hidden="true"></span><strong id="program-core-status">正在读取核心状态</strong><code id="program-endpoint">—</code></div>
   </article>
@@ -110,7 +110,7 @@ export function mountProgramManager(root: HTMLElement, services: ProgramServices
       ? `<div class="program-empty"><span aria-hidden="true">＋</span><strong>还没有添加程序</strong><p>填写程序信息，保存后即可按需启动。</p></div>`
       : state.programs.map((program) => {
         const blocked = launchBlockReason(program, state!);
-        const status = !program.available ? "文件不存在" : program.runningPid !== null ? `已启动 · PID ${program.runningPid}` : "未由本次 RouteDeck 会话启动，程序可能已在运行";
+        const status = !program.available ? "文件不存在" : program.runningPid !== null ? `已启动 · PID ${program.runningPid}` : "未由本次 Serylane 会话启动，程序可能已在运行";
         return `<section class="program-card" data-program-id="${escape(program.id)}" aria-label="${escape(program.name)}">
           <div class="program-card-heading"><span class="program-icon" aria-hidden="true">${escape(program.name.slice(0, 1).toUpperCase())}</span><div><h3>${escape(program.name)}</h3><span class="program-mode-badge">${program.mode === "chromium" ? "Chromium / Electron" : "环境变量"}</span></div></div>
           <p class="program-exe" title="${escape(program.executable)}">${escape(program.executable)}</p>
@@ -210,7 +210,7 @@ export function mountProgramManager(root: HTMLElement, services: ProgramServices
         window.requestAnimationFrame(() => field("name").focus());
       } else if (action === "delete") {
         const revision = state!.revision;
-        if (!await services.confirm({ title: `从清单移除“${program.name}”？`, message: "只删除 RouteDeck 中的这条配置，不删除程序文件、不卸载软件，也不关闭已运行的进程。", confirmLabel: "移除条目", returnFocus: $("#program-refresh") })) return;
+        if (!await services.confirm({ title: `从清单移除“${program.name}”？`, message: "只删除 Serylane 中的这条配置，不删除程序文件、不卸载软件，也不关闭已运行的进程。", confirmLabel: "移除条目", returnFocus: $("#program-refresh") })) return;
         state = await services.api.deleteProxyProgram(program.id, revision);
         if (editing === program.id) reset();
         else if (draftRevision === revision) draftRevision = state.revision;
