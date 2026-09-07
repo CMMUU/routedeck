@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f9fd">
+  <title>Serylane — 开源 Mihomo 桌面代理客户端（原 RouteDeck）</title>
+  <meta name="description" content="Serylane（原 RouteDeck）是基于 Mihomo 的开源桌面代理客户端，面向 Windows、macOS 与 Linux。管理订阅用量、节点和分流规则，按需启用默认关闭的 Codex 本地兼容路由。">
+  <link rel="canonical" href="https://serylane.cmmuu.com/">
+  <link rel="icon" type="image/png" href="/assets/serylane-mark.png">
+  <link rel="stylesheet" href="/styles.css">
+  <meta property="og:type" content="website">
+  <meta property="og:locale" content="zh_CN">
+  <meta property="og:site_name" content="Serylane">
+  <meta property="og:title" content="Serylane — 让连接，清晰有序。">
+  <meta property="og:description" content="基于 Mihomo 的开源桌面代理客户端。订阅、分流与可选 Codex 路由，尽在一处。原 RouteDeck。">
+  <meta property="og:url" content="https://serylane.cmmuu.com/">
+  <meta property="og:image" content="https://serylane.cmmuu.com/assets/serylane-mark.png">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Serylane — 开源桌面代理客户端">
+  <meta name="twitter:description" content="订阅、分流与可选 Codex 路由，尽在一处。原 RouteDeck。">
+  <meta name="twitter:image" content="https://serylane.cmmuu.com/assets/serylane-mark.png">
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Serylane","alternateName":"RouteDeck","url":"https://serylane.cmmuu.com/","description":"基于 Mihomo 的开源桌面代理客户端，提供订阅、分流规则、系统代理与默认关闭的 Codex 本地兼容路由。","applicationCategory":"UtilitiesApplication","operatingSystem":"Windows, macOS, Linux","isAccessibleForFree":true,"license":"https://github.com/CMMUU/routedeck/blob/main/LICENSE","downloadUrl":"https://serylane.cmmuu.com/#download","softwareHelp":"https://serylane.cmmuu.com/docs/"}</script>
+  <script src="/site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <svg class="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15m-6-6 6 6-6 6"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 15v5h16v-5"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4h6v6m0-6-10 10M10 4H4v16h16v-6"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10 9-7 9 7v10H3V10Zm6 10v-7h6v7"/></symbol>
+    <symbol id="i-config" viewBox="0 0 24 24"><path d="M14 3H5v16h7M8 7h6M8 11h3M17 3v5h5M14 3l8 5v3"/><circle cx="17" cy="17" r="4"/></symbol>
+    <symbol id="i-subscription" viewBox="0 0 24 24"><rect x="4" y="3" width="15" height="18" rx="2"/><path d="m7 8 1 1 2-2m2 1h4m-9 5 1 1 2-2m2 1h4m-9 4h7"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18M5 6h14M5 18h14"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4M7 8h10"/></symbol>
+    <symbol id="i-route" viewBox="0 0 24 24"><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="12" cy="19" r="2"/><path d="M5 7c0 5 7 4 7 10m7-10c0 5-7 4-7 10"/></symbol>
+    <symbol id="i-rules" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 8h8M8 12h5M8 16h8"/></symbol>
+    <symbol id="i-connection" viewBox="0 0 24 24"><circle cx="12" cy="5" r="3"/><path d="M7 10c-4 2-5 7-2 9l5 2m7-11c4 2 5 7 2 9l-5 2M12 11v8"/></symbol>
+    <symbol id="i-log" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 7h4m-4 5h8m-8 5h6"/></symbol>
+    <symbol id="i-diagnostic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v5m0 10v5M2 12h5m10 0h5M5 5l3 3m8 8 3 3M5 19l3-3m8-8 3-3"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="m9 3-.7 3-2.5 1-2.8-.7L1.5 9l2.1 2v2l-2.1 2L3 18l2.8-.7 2.5 1 .7 3h4l.7-3 2.5-1 2.8.7 1.5-3-2.1-2v-2l2.1-2L19 6.3l-2.8.7-2.5-1L13 3Z"/><circle cx="11" cy="12" r="3"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M4 3h13l3 3v15H4V3Zm3 0v7h9V3M8 21v-7h8v7"/></symbol>
+    <symbol id="i-usage" viewBox="0 0 32 32"><path d="M18 28H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3h15a3 3 0 0 1 3 3v9M8 10h11M8 15h7M8 20h4"/><circle cx="24" cy="23" r="6"/><path d="M24 19v4h4"/></symbol>
+    <symbol id="i-split" viewBox="0 0 32 32"><circle cx="26" cy="5" r="3"/><circle cx="26" cy="16" r="3"/><circle cx="26" cy="27" r="3"/><path d="M3 16h20M3 16C15 16 6 5 23 5M3 16c12 0 3 11 20 11"/></symbol>
+    <symbol id="i-update" viewBox="0 0 32 32"><path d="M12 3a13 13 0 0 1 13 22M20 29A13 13 0 0 1 7 7m0-5 1 5-5 1m22 16-1 5 5-1"/><rect x="11" y="10" width="11" height="13" rx="1"/><path d="M14 14h5m-5 4h4"/></symbol>
+    <symbol id="i-exchange" viewBox="0 0 24 24"><path d="M3 7h17m-4-4 4 4-4 4M21 17H4m4-4-4 4 4 4"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="m10 7 3-3a5 5 0 0 1 7 7l-3 3M14 17l-3 3a5 5 0 0 1-7-7l3-3m1 6 8-8"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 2 8 3v6c0 5-4 8-8 11-4-3-8-6-8-11V5l8-3Zm-4 9 3 3 5-6"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-11v1"/></symbol>
+    <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></symbol>
+    <symbol id="i-windows" viewBox="0 0 24 24"><path d="M2 4.5 10.5 3v8.2H2Zm10-1.8L22 1v10.2H12ZM2 12.8h8.5V21L2 19.5Zm10 0h10V23l-10-1.7Z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-apple" viewBox="0 0 24 24"><path d="M16.4 1c.2 1.7-.5 3.3-1.5 4.4-1.1 1.1-2.6 1.8-4 1.6-.3-1.6.6-3.3 1.6-4.3C13.6 1.6 15.2 1 16.4 1ZM20.9 17c-.5 1.2-.8 1.7-1.4 2.7-.9 1.3-2.2 3.2-3.8 3.2-1.4 0-1.8-.9-3.7-.9-2 0-2.4.9-3.8.9-1.6 0-2.8-1.7-3.7-3-2.6-3.8-2.8-8.3-1.2-10.7C4.5 7.5 6.3 6.7 8 6.7c1.6 0 2.6.9 4 .9 1.3 0 2.1-.9 4-.9 1.5 0 3.1.8 4.2 2-3.7 2-3.1 7.2.7 8.3Z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-linux" viewBox="0 0 24 24"><path d="M8 9c-1-5 1-7 4-7s5 2 4 7c3 3 4 6 3 9l3 3-6 1-2-2h-4l-2 2-6-1 3-3c-1-3 0-6 3-9Z"/><path d="m9 9 3 2 3-2m-7 4-1 4m9-4 1 4M10 6v1m4-1v1"/></symbol>
+    <symbol id="i-github" viewBox="0 0 24 24"><path fill="currentColor" stroke="none" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.86c-2.78.61-3.37-1.18-3.37-1.18-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.61.07-.61 1 .07 1.53 1.03 1.53 1.03.89 1.53 2.34 1.09 2.91.83.09-.65.35-1.09.64-1.34-2.22-.26-4.55-1.12-4.55-4.95 0-1.09.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.03a9.6 9.6 0 0 1 5 0c1.91-1.3 2.75-1.03 2.75-1.03.55 1.38.2 2.4.1 2.65.64.7 1.03 1.6 1.03 2.69 0 3.84-2.34 4.69-4.57 4.94.36.31.68.92.68 1.86v2.75c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"/></symbol>
+  </defs></svg>
+
+    <header class="site-header page-width">
+      <a class="brand" href="/" aria-label="Serylane 首页"><img src="/assets/serylane-mark.png" width="42" height="50" alt=""><span>Serylane</span></a>
+      <button class="menu-toggle" type="button" aria-label="打开导航" aria-controls="main-nav" aria-expanded="false"><svg class="icon"><use href="#i-menu"/></svg></button>
+      <nav class="main-nav" id="main-nav" aria-label="主要导航">
+        <a href="#features">功能</a><a href="/docs/">文档</a><a href="https://github.com/CMMUU/routedeck" rel="noopener noreferrer" target="_blank">GitHub</a><a class="button button-primary nav-download" href="#download">下载</a>
+      </nav>
+    </header>
+    <main id="main">
+      <div class="opening">
+      <section class="hero page-width" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <h1 id="hero-title">让连接，<br>清晰有序。</h1>
+          <p class="hero-description">基于 Mihomo 的开源桌面代理客户端。<br>订阅、分流与可选 Codex 路由，尽在一处。</p>
+          <div class="hero-actions"><a class="button button-primary" href="#download" data-select-windows><svg class="icon"><use href="#i-download"/></svg>下载 Windows 版</a><a class="text-link" href="https://github.com/CMMUU/routedeck" target="_blank" rel="noopener noreferrer">查看源码<svg class="icon"><use href="#i-arrow"/></svg></a></div>
+          <p class="hero-platforms">也适用于 macOS 与 Linux</p><p class="previous-name">原 RouteDeck</p>
+        </div>
+        <figure class="app-preview" aria-labelledby="app-preview-caption">
+          <div class="preview-titlebar"><span>Serylane</span><div class="window-glyphs" aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M3 8h10"/></svg><svg viewBox="0 0 16 16"><rect x="3" y="3" width="10" height="10" rx="1"/></svg><svg viewBox="0 0 16 16"><path d="m3 3 10 10M13 3 3 13"/></svg></div></div>
+          <div class="preview-layout">
+            <div class="preview-sidebar" aria-hidden="true">
+              <span><svg class="icon"><use href="#i-home"/></svg>概览</span><span><svg class="icon"><use href="#i-config"/></svg>配置</span><span><svg class="icon"><use href="#i-subscription"/></svg>订阅</span><span><svg class="icon"><use href="#i-globe"/></svg>代理</span><span><svg class="icon"><use href="#i-monitor"/></svg>程序代理</span><span class="is-current"><svg class="icon"><use href="#i-route"/></svg>路由</span><span><svg class="icon"><use href="#i-rules"/></svg>规则</span><span><svg class="icon"><use href="#i-connection"/></svg>连接</span><span><svg class="icon"><use href="#i-log"/></svg>日志</span><span><svg class="icon"><use href="#i-diagnostic"/></svg>诊断</span><span><svg class="icon"><use href="#i-settings"/></svg>设置</span>
+            </div>
+            <div class="preview-main">
+              <h2>路由</h2><p class="preview-subtitle">Codex 模型请求的独立入口</p>
+              <dl class="preview-rows"><div><dt>路由服务</dt><dd><span class="illustrated-switch" aria-hidden="true"></span>已关闭</dd></div><div><dt>传输模式</dt><dd>兼容模式 · HTTP/SSE<svg class="icon"><use href="#i-chevron"/></svg></dd></div><div><dt>接入状态</dt><dd>未接入<span aria-hidden="true">—</span></dd></div></dl>
+              <div class="illustrated-actions" aria-hidden="true"><span><svg class="icon"><use href="#i-save"/></svg>保存设置</span><span class="illustrated-disabled"><svg class="icon"><use href="#i-route"/></svg>接入 Codex</span></div>
+              <p class="preview-help">保存设置不会启动服务，也不会接入 Codex。</p>
+            </div>
+          </div>
+          <figcaption id="app-preview-caption">界面示意 · 非实时状态</figcaption>
+        </figure>
+      </section>
+      <div class="technology-rail page-width" aria-label="项目技术与许可"><span>Mihomo 内核</span><span>Rust + Tauri 2</span><a href="https://github.com/CMMUU/routedeck/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">GPL-3.0-only 开源</a></div>
+  </div>
+
+      <section class="features-section" id="features" aria-labelledby="features-title">
+        <div class="page-width">
+          <h2 class="section-title" id="features-title">日常所需，不必繁复。</h2>
+          <p class="section-description">清晰的信息，独立的操作，保留选择的余地。</p>
+          <div class="feature-rail">
+            <article><svg class="feature-icon icon"><use href="#i-usage"/></svg><h3>订阅，心中有数。</h3><p>查看服务商返回的用量与到期时间。<br>缺失数据明确标注，不把未知显示为零。</p></article>
+            <article><svg class="feature-icon icon"><use href="#i-split"/></svg><h3>分流，各行其道。</h3><p>管理节点、规则与程序代理。<br>配置与规则保留版本与回滚入口。</p></article>
+            <article><svg class="feature-icon icon"><use href="#i-update"/></svg><h3>更新，有据可查。</h3><p>自动更新：同版本优先国内渠道，GitHub 备用。<br>应用内更新校验项目签名与 SHA-256。</p></article>
+          </div>
+        </div>
+        <div class="routing-showcase">
+          <div class="routing-content">
+            <div class="routing-copy"><h2 class="section-title">路由能力，<br>由你决定。</h2><p>默认关闭。仅在你需要时，<br>为 Codex 模型请求提供本地兼容入口。</p><a class="text-link" href="/docs/routing">查看接入与恢复说明<svg class="icon"><use href="#i-chevron"/></svg></a></div>
+            <figure class="route-preview" aria-labelledby="route-preview-caption"><figcaption id="route-preview-caption">界面示意 · 非实时状态</figcaption><dl><div><dt><svg class="icon"><use href="#i-globe"/></svg>路由服务</dt><dd><span class="illustrated-switch" aria-hidden="true"></span><span>OFF</span>已关闭</dd></div><div><dt><svg class="icon"><use href="#i-exchange"/></svg>传输模式</dt><dd>HTTP/SSE 兼容模式</dd></div><div><dt><svg class="icon"><use href="#i-link"/></svg>Codex 接入</dt><dd>未接入</dd></div></dl></figure>
+            <div class="routing-workflow"><ol aria-label="路由接入的三个独立步骤"><li><span class="step-number">1</span>保存设置</li><li><span class="step-number">2</span>启用服务</li><li><span class="step-number">3</span>确认接入</li></ol><p>三个独立操作；接入前备份，恢复时检查冲突。</p></div>
+          </div>
+          <p class="routing-safety"><svg class="icon"><use href="#i-shield"/></svg>节点切换仅影响后续新连接，已中断的数据流无法无缝续接。</p>
+        </div>
+      </section>
+
+      <section class="download-section page-width" id="download" aria-labelledby="download-title">
+        <div class="download-copy"><h2 class="section-title" id="download-title">从你的桌面开始。</h2><p class="section-description">选择系统与架构，<br>从项目发布页获取安装包。</p></div>
+        <div class="download-pane">
+          <div class="system-tabs" role="tablist" aria-label="选择操作系统"><button type="button" role="tab" aria-selected="true" aria-controls="download-panel" id="tab-windows" data-system="windows" disabled><svg class="icon"><use href="#i-windows"/></svg>Windows</button><button type="button" role="tab" aria-selected="false" aria-controls="download-panel" id="tab-macos" data-system="macos" tabindex="-1" disabled><svg class="icon"><use href="#i-apple"/></svg>macOS</button><button type="button" role="tab" aria-selected="false" aria-controls="download-panel" id="tab-linux" data-system="linux" tabindex="-1" disabled><svg class="icon"><use href="#i-linux"/></svg>Linux</button></div>
+          <div id="download-panel" role="tabpanel" aria-labelledby="tab-windows" tabindex="0">
+            <h3 class="platform-title"><svg class="icon" id="platform-icon"><use href="#i-windows"/></svg><span id="platform-name">Windows 10 / 11</span></h3>
+            <div class="architecture-selector" role="group" aria-label="选择处理器架构"><button type="button" data-architecture="x64" aria-pressed="true" disabled>x64</button><button type="button" data-architecture="arm64" aria-pressed="false" disabled>ARM64</button></div>
+            <div class="release-links"><a class="button button-primary" id="download-github" href="https://github.com/CMMUU/routedeck/releases/download/v0.7.3/RouteDeck_0.7.3_x64-setup.exe" aria-label="从 GitHub 下载 RouteDeck v0.7.3 Windows x64 EXE 安装包" target="_blank" rel="noopener noreferrer"><svg class="icon"><use href="#i-github"/></svg><span>GitHub 下载 · EXE</span></a><a class="button button-secondary" id="download-gitee" href="https://gitee.com/cmmuu/routedeck/releases/tag/v0.7.3" aria-label="查看 Gitee v0.7.3 发布页；当前未提供 Windows x64 EXE 安装包" target="_blank" rel="noopener noreferrer"><svg class="icon"><use href="#i-external"/></svg><span>查看 Gitee 发布</span></a></div>
+            <p class="download-note"><svg class="icon"><use href="#i-info"/></svg><span id="channel-note">国内镜像暂缺 Windows x64 EXE 安装包，请使用 GitHub。</span></p>
+            <p class="download-note muted"><svg class="icon"><use href="#i-info"/></svg>最新已验证版本 v0.7.3（安装包名 RouteDeck）。</p>
+            <p class="sr-only" id="download-selection" aria-live="polite">已选择 Windows x64，EXE 安装包；国内镜像缺少对应文件，请从 GitHub 下载 v0.7.3。</p>
+            <noscript><p class="download-note">当前提供 Windows x64 下载。切换系统与架构需要启用 JavaScript；也可在<a href="https://github.com/CMMUU/routedeck/releases/tag/v0.7.3">完整发布页</a>选择其他安装包。</p></noscript>
+            <div class="download-resources"><a class="text-link" href="https://github.com/CMMUU/routedeck/blob/main/CHANGELOG.md" target="_blank" rel="noopener noreferrer"><svg class="icon"><use href="#i-log"/></svg>更新日志</a><a class="text-link" href="/docs/verification"><svg class="icon"><use href="#i-shield"/></svg>校验与签名说明</a></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="faq-section page-width" aria-labelledby="faq-title"><h2 id="faq-title">开始前，你可能想知道。</h2><div class="faq-list">
+        <details open><summary>是否提供代理节点或订阅？<svg class="icon"><use href="#i-chevron"/></svg></summary><p>没有。你需要自行准备订阅或本地配置。</p></details>
+        <details open><summary>安装后会自动接入 Codex 吗？<svg class="icon"><use href="#i-chevron"/></svg></summary><p>不会。路由默认关闭，启用与接入需要分别操作。</p></details>
+        <details open><summary>Windows TUN 可以直接日常使用吗？<svg class="icon"><use href="#i-chevron"/></svg></summary><p>目前为实验性功能，使用前请阅读<a href="/docs/#windows-tun">限制与恢复说明</a>。</p></details>
+      </div></section>
+    </main>
+
+    <footer class="site-footer"><div class="footer-inner page-width"><a class="brand footer-brand" href="/" aria-label="Serylane 首页"><img src="/assets/serylane-mark.png" width="56" height="64" alt=""><span>Serylane<small>桌面代理客户端</small></span></a><p class="footer-license">原 RouteDeck · GPL-3.0-only</p><nav aria-label="页脚导航"><a href="https://github.com/CMMUU/routedeck" target="_blank" rel="noopener noreferrer">GitHub</a><a href="https://gitee.com/cmmuu/routedeck" target="_blank" rel="noopener noreferrer">Gitee</a><a href="/docs/">文档</a><a href="https://github.com/CMMUU/routedeck/blob/main/CHANGELOG.md" target="_blank" rel="noopener noreferrer">更新日志</a></nav><p class="independence">独立项目，非 Mihomo、<br>Clash 或 OpenAI 官方产品。</p></div></footer>
+</body>
+</html>

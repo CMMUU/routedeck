@@ -1,0 +1,16 @@
+{
+  "name": "serylane-website",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node scripts/check-site.mjs",
+    "test": "node scripts/check-site.mjs && node scripts/test-downloads.mjs",
+    "dev": "node scripts/serve.mjs",
+    "deploy:check": "wrangler deploy --dry-run",
+    "deploy": "node scripts/check-site.mjs && node scripts/test-downloads.mjs && wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.129.0"
+  }
+}
