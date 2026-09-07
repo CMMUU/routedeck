@@ -672,6 +672,10 @@ pub async fn install_app_update(
             return Err(failure("安装包版本或摘要校验失败"));
         }
         // No disruptive work before explicit confirmation and a verified package.
+        app.state::<crate::local_routing::LocalRoutingManager>()
+            .shutdown(&app)?;
+        app.state::<crate::openai_stability::StabilityManager>()
+            .stop();
         crate::platform::restore_system_proxy(&app)?;
         app.state::<MihomoRuntime>().stop(Some(&app))?;
         app.state::<crate::OpenAiPolicyTaskManager>().cancel()?;

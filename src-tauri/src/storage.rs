@@ -1,7 +1,8 @@
 use crate::error::{AppError, AppResult};
 use crate::models::{
     AppSettings, ConfigRevision, OpenAiPolicy, PersistentAppState, ProfileRecord, ProfileSource,
-    SubscriptionMetadata, ValidationReport, CURRENT_SCHEMA_VERSION,
+    SubscriptionMetadata, SubscriptionStatus, SubscriptionUsage, ValidationReport,
+    CURRENT_SCHEMA_VERSION,
 };
 use crate::user_rules::UserRulesDocument;
 use chrono::Utc;
@@ -19,6 +20,10 @@ pub struct AppStorage {
 }
 
 impl AppStorage {
+    pub(crate) fn routing_dir(&self) -> PathBuf {
+        self.root.join("local-routing")
+    }
+
     pub fn from_app(app: &AppHandle) -> AppResult<Self> {
         let root = app
             .path()
@@ -167,6 +172,49 @@ impl AppStorage {
 
     pub fn save_profile(&self, profile: &ProfileRecord) -> AppResult<()> {
         write_json_atomic(&self.profile_dir(profile.id).join("metadata.json"), profile)
+    }
+
+    pub fn subscription_status(&self, profile_id: Uuid) -> Option<SubscriptionStatus> {
+        let path = self
+            .profile_dir(profile_id)
+            .join("subscription-status.json");
+        // Observations are optional cache data. A missing/corrupt cache must not
+        // prevent listing, selecting, or recovering the actual subscription.
+        if fs::metadata(&path).ok()?.len() > 16 * 1024 {
+            return None;
+        }
+        read_json(&path).ok()
+    }
+
+    pub fn record_subscription_check(
+        &self,
+        profile_id: Uuid,
+        usage: Option<&SubscriptionUsage>,
+        error: Option<&AppError>,
+    ) -> AppResult<()> {
+        static OBSERVATION_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _permit = OBSERVATION_WRITE
+            .lock()
+            .map_err(|_| AppError::Io("订阅检查记录暂时无法保存".into()))?;
+        self.load_profile(profile_id)?;
+        let mut status = self.subscription_status(profile_id).unwrap_or_default();
+        let now = Utc::now();
+        status.checked_at = Some(now);
+        status.last_error = error.map(crate::subscription::safe_subscription_error);
+        if error.is_none() {
+            if let Some(usage) = usage {
+                status.usage = Some(usage.clone());
+                status.usage_updated_at = Some(now);
+            }
+        }
+        // Separate from immutable revisions, active selection and runtime YAML:
+        // refreshing a quota must never restart/hot-reload an existing stream.
+        write_json_atomic(
+            &self
+                .profile_dir(profile_id)
+                .join("subscription-status.json"),
+            &status,
+        )
     }
 
     pub fn delete_profile(&self, profile_id: Uuid) -> AppResult<()> {
@@ -493,12 +541,147 @@ fn secure_existing_tree(path: &Path) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::AppStorage;
-    use crate::models::{OpenAiPolicy, ProfileSource, ValidationReport};
+    use crate::error::AppError;
+    use crate::models::{OpenAiPolicy, ProfileSource, SubscriptionUsage, ValidationReport};
     use std::fs;
     use uuid::Uuid;
 
     fn temp_root() -> std::path::PathBuf {
         std::env::temp_dir().join(format!("routedeck-storage-{}", Uuid::new_v4()))
+    }
+
+    #[test]
+    fn subscription_observations_preserve_quota_on_missing_headers_and_failure() {
+        let root = temp_root();
+        let storage = AppStorage::from_root(root.clone()).expect("storage");
+        let profile = storage
+            .create_profile(
+                "quota fixture".into(),
+                ProfileSource::RemoteSubscription {
+                    url: "https://subscription.example.invalid/config?token=secret".into(),
+                    user_agent: "clash.meta".into(),
+                },
+            )
+            .expect("profile");
+        let revision = storage
+            .save_revision(
+                profile.id,
+                "proxies: []",
+                "proxies: []",
+                None,
+                ValidationReport::default(),
+                OpenAiPolicy::default(),
+            )
+            .expect("revision");
+        storage
+            .activate_revision(profile.id, revision.id)
+            .expect("activate fixture only");
+        let revision_path = storage
+            .revision_dir(profile.id, revision.id)
+            .join("validation.json");
+        let profile_path = storage.profile_dir(profile.id).join("metadata.json");
+        let original_revision = fs::read(&revision_path).expect("revision bytes");
+        let original_profile = fs::read(&profile_path).expect("profile bytes");
+        let original_runtime = storage.active_runtime_config().expect("runtime");
+        assert!(storage.subscription_status(profile.id).is_none());
+        let usage = SubscriptionUsage {
+            upload_bytes: Some(0),
+            download_bytes: Some(200),
+            total_bytes: Some(1000),
+            expires_at: None,
+        };
+        storage
+            .record_subscription_check(profile.id, Some(&usage), None)
+            .expect("initial usage");
+        let initial = storage.subscription_status(profile.id).expect("status");
+        assert_eq!(initial.usage, Some(usage.clone()));
+        assert!(initial.last_error.is_none());
+        storage
+            .record_subscription_check(profile.id, None, None)
+            .expect("200/304 without header");
+        let unchanged = storage
+            .subscription_status(profile.id)
+            .expect("unchanged status");
+        assert_eq!(unchanged.usage, initial.usage);
+        assert_eq!(unchanged.usage_updated_at, initial.usage_updated_at);
+        assert!(unchanged.checked_at >= initial.checked_at);
+        let failure =
+            AppError::Subscription("HTTP 403 https://private.example/sub?token=hidden".into());
+        storage
+            .record_subscription_check(profile.id, None, Some(&failure))
+            .expect("failure status");
+        let failed = storage.subscription_status(profile.id).expect("failure");
+        assert!(failed
+            .last_error
+            .as_ref()
+            .expect("error")
+            .contains("HTTP 403"));
+        assert_eq!(failed.usage, initial.usage);
+        assert_eq!(failed.usage_updated_at, initial.usage_updated_at);
+        let serialized = fs::read_to_string(
+            storage
+                .profile_dir(profile.id)
+                .join("subscription-status.json"),
+        )
+        .expect("cache");
+        assert!(!serialized.contains("private.example"));
+        assert!(!serialized.contains("token="));
+        storage
+            .record_subscription_check(profile.id, None, None)
+            .expect("successful check clears failure");
+        assert!(storage
+            .subscription_status(profile.id)
+            .expect("recovered")
+            .last_error
+            .is_none());
+        assert_eq!(
+            fs::read(revision_path).expect("unchanged revision"),
+            original_revision
+        );
+        assert_eq!(
+            fs::read(profile_path).expect("unchanged profile"),
+            original_profile
+        );
+        assert_eq!(
+            storage.list_revisions(profile.id).expect("versions").len(),
+            1
+        );
+        assert_eq!(
+            storage.active_runtime_config().expect("unchanged runtime"),
+            original_runtime
+        );
+        fs::remove_dir_all(root).expect("cleanup fixture");
+    }
+
+    #[test]
+    fn damaged_optional_observation_does_not_hide_subscriptions() {
+        let root = temp_root();
+        let storage = AppStorage::from_root(root.clone()).expect("storage");
+        let profile = storage
+            .create_profile(
+                "fixture".into(),
+                ProfileSource::Inline {
+                    label: "fixture".into(),
+                },
+            )
+            .expect("profile");
+        let path = storage
+            .profile_dir(profile.id)
+            .join("subscription-status.json");
+        fs::write(&path, b"not JSON").expect("corrupt optional cache");
+        assert!(storage.subscription_status(profile.id).is_none());
+        assert_eq!(
+            storage.list_profiles().expect("profiles available").len(),
+            1
+        );
+        fs::write(&path, b"{}").expect("old optional data");
+        let old = storage
+            .subscription_status(profile.id)
+            .expect("default fields");
+        assert!(old.checked_at.is_none() && old.usage.is_none() && old.last_error.is_none());
+        fs::write(&path, vec![b' '; 16 * 1024 + 1]).expect("oversized cache");
+        assert!(storage.subscription_status(profile.id).is_none());
+        fs::remove_dir_all(root).expect("cleanup fixture");
     }
 
     #[test]

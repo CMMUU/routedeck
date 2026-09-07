@@ -110,7 +110,7 @@ export function mountProgramManager(root: HTMLElement, services: ProgramServices
       ? `<div class="program-empty"><span aria-hidden="true">＋</span><strong>还没有添加程序</strong><p>填写程序信息，保存后即可按需启动。</p></div>`
       : state.programs.map((program) => {
         const blocked = launchBlockReason(program, state!);
-        const status = !program.available ? "文件不存在" : program.runningPid !== null ? `已启动 · PID ${program.runningPid}` : "未跟踪到运行实例";
+        const status = !program.available ? "文件不存在" : program.runningPid !== null ? `已启动 · PID ${program.runningPid}` : "未由本次 RouteDeck 会话启动，程序可能已在运行";
         return `<section class="program-card" data-program-id="${escape(program.id)}" aria-label="${escape(program.name)}">
           <div class="program-card-heading"><span class="program-icon" aria-hidden="true">${escape(program.name.slice(0, 1).toUpperCase())}</span><div><h3>${escape(program.name)}</h3><span class="program-mode-badge">${program.mode === "chromium" ? "Chromium / Electron" : "环境变量"}</span></div></div>
           <p class="program-exe" title="${escape(program.executable)}">${escape(program.executable)}</p>

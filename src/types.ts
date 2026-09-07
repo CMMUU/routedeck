@@ -29,7 +29,16 @@ export type OpenAiNodeScore = {
   checkedAt: string;
 };
 
+export type RouteSettings = { listenPort: number; mode: "native" | "compatible"; upstream: "chatgpt" | "openai_api"; outboundProxy: string };
+export type RouteSnapshot = {
+  revision: number; enabled: boolean; running: boolean; settings: RouteSettings; endpoint: string;
+  requests: number; active: number; completed: number; failed: number; lastStatus: number; lastError: string | null;
+  codex: { configRevision: string; attached: boolean; hasBackup: boolean; provider: string; endpoint: string | null; warning: string | null; backupPath: string | null };
+  stability: { enabled: boolean; running: boolean; eligible: boolean; profileId: string | null; revisionId: string | null; current: string | null; lastSwitch: number | null; message: string;
+    nodes: { name: string; probeOk: boolean; successRate: number | null; samples: number; cooldownSeconds: number; recoveryPasses: number; modelCompleted: number; modelInterrupted: number }[] };
+};
 export type OpenAiPolicy = {
+  stabilityEnabled?: boolean;
   enabled: boolean;
   autoMaintain: boolean;
   maxNodes: number;
@@ -125,11 +134,27 @@ export type ProfileRecord = {
   updatedAt: string;
 };
 
+export type SubscriptionUsage = {
+  uploadBytes: number | null;
+  downloadBytes: number | null;
+  totalBytes: number | null;
+  /** Provider expiry as Unix seconds; zero does not establish unlimited validity. */
+  expiresAt: number | null;
+};
+
+export type SubscriptionStatus = {
+  checkedAt: string | null;
+  lastError: string | null;
+  usage: SubscriptionUsage | null;
+  usageUpdatedAt: string | null;
+};
+
 export type SubscriptionMetadata = {
   contentType: string | null;
   etag: string | null;
   lastModified: string | null;
   bytes: number;
+  usage?: SubscriptionUsage | null;
 };
 
 export type ValidationReport = {
@@ -187,6 +212,7 @@ export type SubscriptionOverview = {
   latestMetadata: SubscriptionMetadata | null;
   latestValidation: ValidationReport | null;
   active: boolean;
+  status?: SubscriptionStatus | null;
 };
 
 export type NodeDelaySample = {

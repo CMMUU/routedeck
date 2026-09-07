@@ -4,11 +4,13 @@ mod config;
 mod diagnostics;
 mod effective;
 mod error;
+mod local_routing;
 mod mihomo_api;
 mod models;
 mod network_safety;
 mod node_details;
 mod openai_policy;
+mod openai_stability;
 mod platform;
 mod profile_service;
 mod program_proxy;
@@ -18,6 +20,8 @@ mod subscription;
 mod traffic_monitor;
 pub mod tun_service;
 mod user_rules;
+#[cfg(all(test, windows, target_env = "msvc"))]
+mod windows_test_manifest;
 
 use config::{inspect_profile, ProfileSummary};
 use diagnostics::DiagnosticCheck;
@@ -654,6 +658,11 @@ async fn get_connections(app: AppHandle) -> Result<Value, AppErrorDto> {
 
 #[tauri::command]
 async fn select_proxy(app: AppHandle, group: String, proxy: String) -> Result<(), AppErrorDto> {
+    let _configuration = user_rules::acquire_configuration(&app).map_err(dto)?;
+    if group == openai_stability::GROUP {
+        app.state::<openai_stability::StabilityManager>()
+            .invalidate_observations();
+    }
     api_client(&app)?
         .select_proxy(&group, &proxy)
         .await
@@ -662,6 +671,11 @@ async fn select_proxy(app: AppHandle, group: String, proxy: String) -> Result<()
 
 #[tauri::command]
 async fn clear_proxy_selection(app: AppHandle, group: String) -> Result<(), AppErrorDto> {
+    let _configuration = user_rules::acquire_configuration(&app).map_err(dto)?;
+    if group == openai_stability::GROUP {
+        app.state::<openai_stability::StabilityManager>()
+            .invalidate_observations();
+    }
     api_client(&app)?
         .clear_proxy_selection(&group)
         .await
@@ -779,6 +793,10 @@ fn api_client(app: &AppHandle) -> Result<MihomoApiClient, AppErrorDto> {
 }
 
 fn cleanup_app(app: &AppHandle) {
+    app.state::<openai_stability::StabilityManager>().stop();
+    let _ = app
+        .state::<local_routing::LocalRoutingManager>()
+        .shutdown(app);
     app.state::<GlobalTrafficMonitor>().stop();
     let _ = app.state::<OpenAiPolicyTaskManager>().cancel();
     let _ = platform::restore_system_proxy(app);
@@ -813,6 +831,8 @@ pub fn run() {
         .manage(MihomoRuntime::default())
         .manage(app_update::AppUpdateManager::default())
         .manage(program_proxy::ProgramProxyManager::default())
+        .manage(local_routing::LocalRoutingManager::default())
+        .manage(openai_stability::StabilityManager::default())
         .manage(SubscriptionImportGuard::default())
         .manage(OpenAiPolicyTaskManager::default())
         .manage(GlobalTrafficMonitor::default())
@@ -874,6 +894,11 @@ pub fn run() {
                 .build(app)?;
             app.state::<GlobalTrafficMonitor>()
                 .start(app.handle().clone(), settings.show_global_traffic);
+            let _ = app
+                .state::<local_routing::LocalRoutingManager>()
+                .bootstrap(app.handle());
+            app.state::<openai_stability::StabilityManager>()
+                .start(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -886,6 +911,11 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
+            local_routing::local_route_status,
+            local_routing::save_local_route,
+            local_routing::set_local_route_enabled,
+            local_routing::set_codex_route,
+            openai_stability::set_openai_stability,
             app_update::check_app_update,
             app_update::app_update_status,
             app_update::save_update_preferences,

@@ -1645,6 +1645,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
 
 [[package]]
+name = "httpdate"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
+
+[[package]]
 name = "hyper"
 version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1657,6 +1663,7 @@ dependencies = [
  "http",
  "http-body",
  "httparse",
+ "httpdate",
  "itoa",
  "pin-project-lite",
  "smallvec",
@@ -3258,12 +3265,15 @@ dependencies = [
 
 [[package]]
 name = "routedeck"
-version = "0.7.2"
+version = "0.7.3"
 dependencies = [
  "block2",
+ "bytes",
  "chrono",
  "fontdue",
  "futures-util",
+ "http-body-util",
+ "hyper",
  "hyper-util",
  "libc",
  "objc2",
@@ -3281,8 +3291,10 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
+ "toml_edit 0.25.13+spec-1.1.0",
  "url",
  "uuid",
  "windows-sys 0.61.2",
@@ -4622,6 +4634,7 @@ dependencies = [
  "indexmap 2.14.0",
  "toml_datetime 1.1.1+spec-1.1.0",
  "toml_parser",
+ "toml_writer",
  "winnow 1.0.4",
 ]
 

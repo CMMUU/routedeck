@@ -3,7 +3,7 @@ use crate::effective::build_effective_config_with_policy;
 use crate::error::{AppError, AppResult};
 use crate::models::{
     ConfigRevision, ProfileRecord, ProfileSource, PublicProfileRecord, RoutingMode,
-    SubscriptionMetadata, ValidationReport,
+    SubscriptionMetadata, SubscriptionStatus, SubscriptionUsage, ValidationReport,
 };
 use crate::storage::AppStorage;
 use crate::subscription::SubscriptionFetcher;
@@ -40,6 +40,7 @@ pub struct SubscriptionOverview {
     pub latest_metadata: Option<SubscriptionMetadata>,
     pub latest_validation: Option<ValidationReport>,
     pub active: bool,
+    pub status: Option<SubscriptionStatus>,
 }
 
 pub fn list_profiles(app: &AppHandle) -> AppResult<Vec<PublicProfileRecord>> {
@@ -75,6 +76,7 @@ pub fn list_subscriptions(app: &AppHandle) -> AppResult<Vec<SubscriptionOverview
                 latest_metadata: latest.and_then(|revision| revision.subscription.clone()),
                 latest_validation: latest.map(|revision| revision.validation.clone()),
                 active: active_profile_id == Some(profile.id),
+                status: storage.subscription_status(profile.id),
             })
         })
         .collect()
@@ -143,6 +145,7 @@ pub async fn create_subscription_profile(
     }
     let fetcher = SubscriptionFetcher::new()?;
     let fetched = fetcher.fetch(&url, &user_agent, None, None).await?;
+    let usage = fetched.metadata.usage.clone();
     let source = fetched
         .content
         .ok_or_else(|| AppError::Subscription("订阅没有返回内容".to_string()))?;
@@ -160,7 +163,10 @@ pub async fn create_subscription_profile(
     )
     .await
     {
-        Ok(result) => Ok(result),
+        Ok(result) => {
+            save_subscription_observation(&storage, profile.id, usage.as_ref(), None)?;
+            Ok(result)
+        }
         Err(error) => {
             let _ = storage.delete_profile(profile.id);
             Err(error)
@@ -203,6 +209,46 @@ pub async fn refresh_profile(
     let ProfileSource::RemoteSubscription { url, user_agent } = &profile.source else {
         return Err(AppError::Conflict("该配置不是远程订阅".to_string()));
     };
+    match refresh_subscription_candidate(app, &storage, &profile, url, user_agent).await {
+        Ok((result, usage)) => {
+            save_subscription_observation(&storage, profile_id, usage.as_ref(), None)?;
+            Ok(result)
+        }
+        Err(error) => {
+            save_subscription_observation(&storage, profile_id, None, Some(&error))?;
+            Err(error)
+        }
+    }
+}
+
+fn save_subscription_observation(
+    storage: &AppStorage,
+    profile_id: Uuid,
+    usage: Option<&SubscriptionUsage>,
+    error: Option<&AppError>,
+) -> AppResult<()> {
+    storage
+        .record_subscription_check(profile_id, usage, error)
+        .map_err(|_| {
+            AppError::Io(
+                if error.is_some() {
+                    "订阅更新失败，且检查记录未能保存；请检查本地存储后重试"
+                } else {
+                    "订阅已获取，但检查记录未能保存；已保留配置结果，请检查本地存储"
+                }
+                .into(),
+            )
+        })
+}
+
+async fn refresh_subscription_candidate(
+    app: &AppHandle,
+    storage: &AppStorage,
+    profile: &ProfileRecord,
+    url: &str,
+    user_agent: &str,
+) -> AppResult<(ProfileOperationResult, Option<SubscriptionUsage>)> {
+    let profile_id = profile.id;
     let latest = storage.list_revisions(profile_id)?.into_iter().next();
     let etag = latest
         .as_ref()
@@ -215,10 +261,12 @@ pub async fn refresh_profile(
     let fetched = SubscriptionFetcher::new()?
         .fetch(url, user_agent, etag, last_modified)
         .await?;
+    let usage = fetched.metadata.usage.clone();
     if fetched.not_modified {
         let revision = latest.ok_or_else(|| AppError::NotFound("当前订阅版本".to_string()))?;
         let source = storage.load_revision_source(profile_id, revision.id)?;
-        return unchanged_operation_result(&profile, revision, &source);
+        return unchanged_operation_result(profile, revision, &source)
+            .map(|result| (result, usage));
     }
     let source = fetched
         .content
@@ -230,14 +278,14 @@ pub async fn refresh_profile(
     let profile = storage.load_profile(profile_id)?;
     if let Some(revision) = storage.list_revisions(profile_id)?.into_iter().next() {
         if let Some(result) =
-            unchanged_operation_if_source_matches(&storage, &profile, &revision, &source)?
+            unchanged_operation_if_source_matches(storage, &profile, &revision, &source)?
         {
-            return Ok(result);
+            return Ok((result, usage));
         }
     }
     persist_candidate_with_permit(
         app,
-        &storage,
+        storage,
         profile,
         source,
         Some(fetched.metadata),
@@ -245,6 +293,7 @@ pub async fn refresh_profile(
         &permit,
     )
     .await
+    .map(|result| (result, usage))
 }
 
 pub async fn activate_profile(
@@ -446,6 +495,39 @@ mod tests {
     use super::*;
     use crate::models::OpenAiPolicy;
     use crate::user_rules::{UserRule, UserRulesDocument};
+
+    #[test]
+    fn subscription_observation_write_failure_is_explicit_and_preserves_saved_data() {
+        let root = tempfile::tempdir().expect("isolated directory");
+        let storage = AppStorage::from_root(root.path().to_owned()).expect("storage");
+        let profile = storage
+            .create_profile(
+                "fixture".into(),
+                ProfileSource::RemoteSubscription {
+                    url: "https://subscription.example.invalid/config".into(),
+                    user_agent: "clash.meta".into(),
+                },
+            )
+            .expect("profile");
+        save_subscription_observation(&storage, profile.id, None, None).expect("initial record");
+        let directory = root.path().join("profiles").join(profile.id.to_string());
+        let status = directory.join("subscription-status.json");
+        let before = std::fs::read(&status).expect("saved status");
+        let before_profile = std::fs::read(directory.join("metadata.json")).expect("profile bytes");
+        std::fs::create_dir(directory.join(".subscription-status.json.backup"))
+            .expect("block atomic replacement");
+        let error = save_subscription_observation(&storage, profile.id, None, None)
+            .expect_err("must report cache write failure");
+        assert!(error.to_string().contains("订阅已获取，但检查记录未能保存"));
+        assert!(!error
+            .to_string()
+            .contains(&root.path().to_string_lossy().to_string()));
+        assert_eq!(std::fs::read(&status).expect("unchanged status"), before);
+        assert_eq!(
+            std::fs::read(directory.join("metadata.json")).expect("unchanged profile"),
+            before_profile
+        );
+    }
 
     #[test]
     fn activating_old_revision_rebuilds_current_global_overrides() {

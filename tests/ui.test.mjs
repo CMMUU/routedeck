@@ -16,12 +16,12 @@ const { preferencesMarkup } = await import(settingsUrl);
 const css = read("desktop-theme.css");
 const main = read("main.ts");
 
-test("all ten navigation items retain unique routes, labels and code-native icons", () => {
-  assert.deepEqual(NAV_ITEMS.map(({ id }) => id), ["overview", "profiles", "subscriptions", "proxies", "programs", "rules", "connections", "logs", "diagnostics", "settings"]);
-  assert.equal(new Set(NAV_ITEMS.map(({ id }) => id)).size, 10);
-  assert.equal((navigationMarkup.match(/<svg /g) ?? []).length, 10);
+test("all eleven navigation items retain unique routes, labels and code-native icons", () => {
+  assert.deepEqual(NAV_ITEMS.map(({ id }) => id), ["overview", "profiles", "subscriptions", "proxies", "programs", "routing", "rules", "connections", "logs", "diagnostics", "settings"]);
+  assert.equal(new Set(NAV_ITEMS.map(({ id }) => id)).size, 11);
+  assert.equal((navigationMarkup.match(/<svg /g) ?? []).length, 11);
   assert.equal((navigationMarkup.match(/aria-current="page"/g) ?? []).length, 1);
-  assert.equal((navigationMarkup.match(/aria-hidden="true"/g) ?? []).length, 10);
+  assert.equal((navigationMarkup.match(/aria-hidden="true"/g) ?? []).length, 11);
 });
 test("switches retain a native checked input and keyboard-focusable control", () => {
   assert.match(preferenceSwitch("settings-launch"), /id="settings-launch" type="checkbox" role="switch"/);
@@ -42,8 +42,11 @@ test("network modes remain native radio drafts, not immediate proxy mutations", 
   assert.doesNotMatch(handler, /api\.|switchNetworkMode|startRuntime|stopRuntime/);
 });
 test("shared theme tokens own the appearance and nav has one accessible active state", () => {
-  assert.match(css, /--bg: #f5f5f7/);
-  assert.match(css, /--primary-background: #007aff/);
+  assert.match(css, /--bg: #e8edfa/);
+  assert.match(css, /--primary-background: #2764eb/);
+  assert.match(css, /backdrop-filter: blur\(var\(--glass-blur\)\)/);
+  assert.match(css, /prefers-reduced-transparency/);
+  assert.doesNotMatch(navigationMarkup, /nav-icon-(blue|purple|green|orange|yellow|red)/);
   assert.match(css, /\.sidebar \.nav-item\[aria-current="page"\]/);
   assert.doesNotMatch(read("styles.css"), /body:has\(#\w+-view/);
   assert.doesNotMatch(main, /<h1[^>]*>应用状态/);

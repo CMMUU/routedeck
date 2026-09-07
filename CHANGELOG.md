@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.3 - 2026-09-07
+
+- Apply the approved frosted-glass design across the desktop shell, readable subscription cards, dark themes and narrow layouts, with keyboard and reduced-transparency fallbacks.
+- Display provider-reported upload/download, allowance, expiry and sample time. Preserve cached usage on missing headers or refresh failure, including HTTP 304 and unchanged configuration bodies without new revisions or runtime reloads.
+- Keep configuration nodes distinct from provider counts, selected profiles distinct from connectivity, and missing quota information distinct from zero or unlimited service.
+- Add an opt-in local model route with separate save/start/Codex attachment, HTTP/SSE compatibility, WebSocket passthrough, backup restoration and active-request/conflict protection.
+- Evaluate OpenAI stability using recent failures and attributable model-stream evidence, with current-node retention, cooldown and recovery hysteresis. Switching affects new connections and does not resume broken streams or replay model requests.
+- Gate subscription and routing regressions in six-platform CI and signed releases; retain domestic-first updates and GitHub fallback for identical verified packages.
+
 ## 0.7.2 - 2026-09-05
 
 - Apply the approved Apple-inspired desktop design with a unified sidebar, settings groups, iconography, rounded interaction states and capsule scrollbars across light, dark, purple and compact layouts.

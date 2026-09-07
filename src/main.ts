@@ -1,11 +1,15 @@
 import "./styles.css";
 import "./desktop-theme.css";
+import "./local-routing.css";
+import "./subscription-cards.css";
+import { subscriptionCardMarkup } from "./subscription-cards";
 import { NAV_ITEMS, navigationMarkup, type ViewName } from "./ui";
 import { preferencesMarkup } from "./settings-view";
 import { api, errorMessage, revisionLabel } from "./api";
 import { describeAppUpdate } from "./app-update";
 import { listen } from "@tauri-apps/api/event";
 import { mountRuleManager, ruleManagerMarkup } from "./rule-manager";
+import { mountLocalRouting, localRoutingMarkup } from "./local-routing";
 import { mountProgramManager, programManagerMarkup, mountProxyCompatibility, proxyCompatibilityMarkup } from "./program-proxy";
 import {
   THEME_OPTIONS,
@@ -109,6 +113,7 @@ const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("#app not found");
 const appIconUrl = new URL("../assets/brand/app-icon-128.png", import.meta.url).href;
 let subscriptionImporting = false;
+const subscriptionRefreshing = new Set<string>();
 let openAiTaskFinishedAt: string | null = null;
 let networkModeSwitching = false;
 let runtimeActionInFlight = false;
@@ -136,19 +141,20 @@ app.innerHTML = `
       <div class="sidebar-footer">
         <div class="sidebar-runtime-status">
           <span class="status-dot" id="sidebar-status-dot"></span>
-          <span id="sidebar-status">正在读取状态</span>
+          <span id="sidebar-status">代理核心 · 未读取</span>
         </div>
         <div class="global-traffic-compact" id="global-traffic-compact" aria-label="全局实时流量">
-          <span class="traffic-upload"><b>↑</b><strong id="global-upload-rate">0 B/s</strong></span>
-          <span class="traffic-download"><b>↓</b><strong id="global-download-rate">0 B/s</strong></span>
+          <span class="traffic-upload"><b>上传</b><strong id="global-upload-rate">—</strong></span>
+          <span class="traffic-download"><b>下载</b><strong id="global-download-rate">—</strong></span>
         </div>
       </div>
       <span class="sidebar-version" id="sidebar-version"></span>
     </aside>
     <main class="main-content">
       <header class="topbar" aria-label="应用状态与全局控制">
-        <div class="page-heading"><h1 id="page-title">概览</h1><div class="application-status-meta"><span id="application-profile-state">未选择订阅</span><span id="application-mode-state">Manual</span></div></div>
+        <div class="page-heading"><h1 id="page-title">概览</h1><p class="page-subtitle">Codex 模型请求的独立入口</p><div class="application-status-meta"><span id="application-profile-state">未选择订阅</span><span id="application-mode-state">Manual</span></div></div>
         <div class="topbar-actions">
+          <span class="core-toolbar-label">代理核心</span>
           <div class="global-secondary-actions">
             <span class="platform-chip" id="platform-chip">检测平台中</span>
             <button class="button status-mode-button" id="global-system-proxy" type="button" aria-pressed="false">系统代理</button>
@@ -156,7 +162,7 @@ app.innerHTML = `
             <button class="button button-quiet" id="global-refresh">刷新</button>
           </div>
           <div class="header-runtime" aria-live="polite"><span class="application-status-dot" id="application-status-dot"></span><strong id="application-runtime-state">正在读取</strong></div>
-          <button class="button button-primary" id="global-start">启动</button>
+          <button class="button button-primary" id="global-start" disabled>启动</button>
           <button class="button button-danger" id="global-stop" disabled>停止</button>
         </div>
       </header>
@@ -264,8 +270,10 @@ app.innerHTML = `
             </div>
           </div>
           <div class="subscription-workspace">
-            <section class="subscription-import-card" aria-labelledby="managed-subscription-title">
-              <div class="subscription-import-intro"><h3 id="managed-subscription-title">添加订阅</h3><p>验证地址、解析配置并保存首个可回滚版本。敏感参数仅在本机存储。</p></div>
+            <details class="subscription-import-card" id="managed-subscription-panel">
+              <summary><span id="managed-subscription-title">添加订阅</span><span>验证并保存新的订阅来源</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
+              <div class="subscription-import-body">
+              <div class="subscription-import-intro"><p>验证地址、解析配置并保存首个可回滚版本。敏感参数仅在本机存储。</p></div>
               <form id="managed-subscription-form" class="managed-subscription-form">
                 <label class="managed-field managed-name-field"><span>订阅名称</span><input id="managed-subscription-name" required value="我的订阅" maxlength="128" /></label>
                 <label class="managed-field managed-url-field"><span>订阅地址</span><input id="managed-subscription-url" required type="url" placeholder="https://example.com/subscribe?token=…" autocomplete="off" spellcheck="false" /></label>
@@ -277,10 +285,11 @@ app.innerHTML = `
                 </div>
               </form>
               <p class="import-status" id="managed-subscription-import-status"></p>
-            </section>
+              </div>
+            </details>
             <div class="subscription-summary-grid">
               <div><span>活动订阅</span><strong id="subscription-summary-active">—</strong></div>
-              <div><span>节点总数</span><strong id="subscription-summary-nodes">0 个可用节点</strong></div>
+              <div><span>配置规模</span><strong id="subscription-summary-nodes">尚未读取</strong></div>
               <div><span>最近更新</span><strong id="subscription-summary-updated">—</strong></div>
               <div><span>网络安全</span><strong id="subscription-summary-safety">等待检查</strong></div>
             </div>
@@ -340,6 +349,9 @@ app.innerHTML = `
         </article>
       </section>
 
+      <section class="view-stack is-hidden" id="routing-view">
+        ${localRoutingMarkup}
+      </section>
       <section class="view-stack is-hidden" id="programs-view">
         ${programManagerMarkup}
       </section>
@@ -400,12 +412,11 @@ app.innerHTML = `
       </section>
       </div>
 
+    </main>
       <div class="toast" id="toast" role="status" aria-live="polite"></div>
       <div class="confirmation-modal-backdrop is-hidden" id="confirmation-modal" role="presentation" aria-hidden="true">
         <section class="confirmation-modal" role="alertdialog" aria-modal="true" aria-labelledby="confirmation-title" aria-describedby="confirmation-message">
-          <div class="confirmation-modal-mark" aria-hidden="true">!</div>
           <div class="confirmation-modal-copy">
-            <p class="section-label">CONFIRM ACTION</p>
             <h2 id="confirmation-title">确认操作</h2>
             <p id="confirmation-message"></p>
           </div>
@@ -420,7 +431,6 @@ app.innerHTML = `
           <div id="node-details-content"></div>
         </section>
       </div>
-    </main>
   </div>
 `;
 
@@ -486,7 +496,9 @@ function closeConfirmation(confirmed: boolean) {
   confirmationResolver = null;
   confirmationReturnFocus = null;
   resolve?.(confirmed);
-  returnFocus?.focus();
+  window.requestAnimationFrame(() => {
+    if (!confirmationResolver && returnFocus?.isConnected) returnFocus.focus();
+  });
 }
 
 function confirmAction(options: {
@@ -507,14 +519,19 @@ function confirmAction(options: {
   title.textContent = options.title;
   message.textContent = options.message;
   confirmButton.textContent = options.confirmLabel ?? "确认";
-  confirmationReturnFocus = options.returnFocus ?? null;
+  const destructive = /删除|清空|恢复|停止|关闭|卸载/.test(options.title);
+  confirmButton.classList.toggle("button-danger", destructive);
+  confirmButton.classList.toggle("button-primary", !destructive);
+  confirmationReturnFocus = options.returnFocus ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
   modal.classList.remove("is-hidden");
   modal.setAttribute("aria-hidden", "false");
   syncModalScrollLock();
 
   return new Promise((resolve) => {
     confirmationResolver = resolve;
-    window.requestAnimationFrame(() => confirmButton.focus());
+    window.requestAnimationFrame(() => {
+      if (confirmationResolver === resolve) $("#confirmation-modal [data-confirmation-action='cancel']")?.focus();
+    });
   });
 }
 
@@ -556,8 +573,8 @@ function renderGlobalTraffic() {
   const enabled = store.settings?.showGlobalTraffic ?? store.globalTraffic?.enabled ?? true;
   container.classList.toggle("is-hidden", !enabled);
   if (!enabled) return;
-  const upload = formatTrafficRate(store.globalTraffic?.uploadBytesPerSecond);
-  const download = formatTrafficRate(store.globalTraffic?.downloadBytesPerSecond);
+  const upload = store.globalTraffic ? formatTrafficRate(store.globalTraffic.uploadBytesPerSecond) : "—";
+  const download = store.globalTraffic ? formatTrafficRate(store.globalTraffic.downloadBytesPerSecond) : "—";
   $("#global-upload-rate")!.textContent = upload;
   $("#global-download-rate")!.textContent = download;
   const interfaces = store.globalTraffic?.interfaces ?? [];
@@ -687,7 +704,7 @@ function renderHeader() {
   $("#sidebar-version")!.textContent = store.appInfo ? `v${store.appInfo.version}` : "";
   $("#page-title")!.textContent = NAV_ITEMS.find((item) => item.id === store.view)!.label;
   document.documentElement.dataset.runtimeRunning = String(running);
-  $("#sidebar-status")!.textContent = running ? "Mihomo 运行中" : "Mihomo 已停止";
+  $("#sidebar-status")!.textContent = !store.runtime ? "代理核心 · 未读取" : running ? "代理核心 · 运行中" : `代理核心 · ${phaseLabel(store.runtime.phase)}`;
   $("#sidebar-status-dot")!.classList.toggle("is-running", running);
   renderGlobalTraffic();
   const systemProxyButton = $("#global-system-proxy") as HTMLButtonElement;
@@ -699,7 +716,7 @@ function renderHeader() {
   tunButton.setAttribute("aria-pressed", String(tunActive));
   tunButton.title = store.tunHelper?.message ?? "TUN 使用最小权限 Helper 接管系统流量";
   tunButton.disabled = controlsBusy || !store.settings || !store.activeProfile;
-  ($("#global-start") as HTMLButtonElement).disabled = running || controlsBusy;
+  ($("#global-start") as HTMLButtonElement).disabled = !store.runtime || !store.activeProfile || running || controlsBusy;
   ($("#global-stop") as HTMLButtonElement).disabled = !running || controlsBusy;
   $("#about-app")!.textContent = store.appInfo?.version ?? "—";
   $("#about-core")!.textContent = store.binary?.version ?? "未找到";
@@ -759,10 +776,6 @@ function profileSourceLabel(profile: ProfileRecord): string {
   return profile.source.type === "local_file" ? "本地文件" : "内联配置";
 }
 
-function routingModeLabel(mode: ProfileRecord["routingMode"]): string {
-  return mode === "global" ? "全局" : mode === "direct" ? "直连" : "规则";
-}
-
 function renderSubscriptions() {
   const list = $("#subscription-manager-list");
   if (!list) return;
@@ -772,7 +785,7 @@ function renderSubscriptions() {
     (total, subscription) =>
       total +
       (subscription.summary
-        ? subscription.summary.nodeCount + subscription.summary.proxyProviderCount
+        ? subscription.summary.nodeCount
         : 0),
     0,
   );
@@ -782,7 +795,8 @@ function renderSubscriptions() {
     .sort();
   const latest = updatedTimes[updatedTimes.length - 1];
   $("#subscription-summary-active")!.textContent = active?.profile.displayName ?? "未选择";
-  $("#subscription-summary-nodes")!.textContent = `${totalNodes} 个可用节点`;
+  const providerCount = subscriptions.reduce((total, subscription) => total + (subscription.summary?.proxyProviderCount ?? 0), 0);
+  $("#subscription-summary-nodes")!.textContent = `${totalNodes} 节点 · ${providerCount} 提供器`;
   $("#subscription-summary-updated")!.textContent = formatPolicyDate(latest);
   $("#subscription-summary-safety")!.textContent = store.networkSafety
     ? store.networkSafety.success
@@ -794,68 +808,18 @@ function renderSubscriptions() {
   $("#subscription-list-caption")!.textContent = `${subscriptions.length} 个订阅 · ${subscriptions.filter((subscription) => subscription.profile.openaiPolicy.autoMaintain).length} 个自动维护`;
 
   if (!subscriptions.length) {
+    ($("#managed-subscription-panel") as HTMLDetailsElement).open = true;
     list.className = "subscription-manager-list empty-state";
     list.textContent = "还没有远程订阅，可在顶部添加。";
     return;
   }
   list.className = "subscription-manager-list";
-  list.innerHTML = subscriptions
-    .map((subscription) => {
-      const { profile, summary, latestMetadata, latestValidation } = subscription;
-      const nodeCount = summary ? summary.nodeCount + summary.proxyProviderCount : 0;
-      const host = profile.source.type === "remote_subscription"
-        ? profile.source.host
-        : "remote-subscription";
-      const taskForProfile = store.openAiTask?.profileId === profile.id;
-      const generationRunning = Boolean(taskForProfile && store.openAiTask?.running);
-      const generationFailed = Boolean(
-        taskForProfile && !store.openAiTask?.running && store.openAiTask?.phase === "failed",
-      );
-      const anotherGenerationRunning = Boolean(store.openAiTask?.running && !taskForProfile);
-      const generationProgress = generationRunning
-        ? `${store.openAiTask!.completed}/${store.openAiTask!.total || "—"}`
-        : "";
-      const openAiButtonLabel = generationRunning
-        ? `停止生成 ${generationProgress}`
-        : profile.openaiPolicy.enabled
-          ? "重新生成容灾"
-          : "OpenAI 容灾";
-      const openAiStatus = generationRunning
-        ? ` · ${openAiTaskPhaseLabel(store.openAiTask!)} ${generationProgress}`
-        : generationFailed
-          ? ` · 上次生成失败：${store.openAiTask?.error ?? "请重试"}`
-        : profile.openaiPolicy.enabled
-          ? ` · OpenAI 容灾 ${profile.openaiPolicy.selectedNodes.length} 个节点`
-          : "";
-      return `
-        <article class="subscription-entry ${subscription.active ? "is-active" : ""}" data-subscription-id="${profile.id}">
-          <div class="subscription-entry-head">
-            <div class="subscription-identity">
-              <span class="subscription-mark">S</span>
-              <div><h3>${escapeHtml(profile.displayName)}</h3><p>${escapeHtml(host)} · Clash / Mihomo</p></div>
-            </div>
-            <span class="subscription-state ${subscription.active ? "is-active" : ""}">${subscription.active ? "活动" : "备用"}</span>
-          </div>
-          <div class="subscription-source" title="订阅凭据已隐藏">https://${escapeHtml(host)}/••••••?token=••••••••</div>
-          <div class="subscription-entry-metrics">
-            <div><span>节点</span><strong>${nodeCount}</strong></div>
-            <div><span>响应大小</span><strong>${formatBytes(latestMetadata?.bytes)}</strong></div>
-            <div><span>版本</span><strong>${subscription.revisionCount}</strong></div>
-            <div><span>最近更新</span><strong>${formatPolicyDate(subscription.latestFetchedAt)}</strong></div>
-          </div>
-          <div class="subscription-entry-footer">
-            <span class="subscription-validation ${generationFailed ? "is-error" : latestValidation?.valid ? "is-valid" : ""}">${latestValidation?.valid ? "✓ 配置已验证" : "等待验证"} · ${routingModeLabel(profile.routingMode)}模式${escapeHtml(openAiStatus)}</span>
-            <div class="toolbar">
-              <button class="button button-openai ${profile.openaiPolicy.enabled ? "is-enabled" : ""}" data-subscription-action="${generationRunning ? "openai-cancel" : "openai-generate"}" data-profile-id="${profile.id}" ${anotherGenerationRunning ? "disabled" : ""}>${openAiButtonLabel}</button>
-              <button class="button button-quiet" data-subscription-action="refresh" data-profile-id="${profile.id}">刷新</button>
-              <button class="button button-quiet" data-subscription-action="activate" data-profile-id="${profile.id}" ${subscription.active ? "disabled" : ""}>激活</button>
-              <button class="button button-quiet" data-subscription-action="versions" data-profile-id="${profile.id}">版本</button>
-              <button class="button button-danger" data-subscription-action="delete" data-profile-id="${profile.id}">删除</button>
-            </div>
-          </div>
-        </article>`;
-    })
-    .join("");
+  const expanded = new Set(Array.from(list.querySelectorAll<HTMLDetailsElement>(".subscription-more[open]"))
+    .map((details) => details.closest<HTMLElement>("[data-subscription-id]")?.dataset.subscriptionId));
+  list.innerHTML = subscriptions.map((subscription) => subscriptionCardMarkup(subscription, store.openAiTask, Date.now(), subscriptionRefreshing.has(subscription.profile.id))).join("");
+  for (const details of list.querySelectorAll<HTMLDetailsElement>(".subscription-more")) {
+    details.open = expanded.has(details.closest<HTMLElement>("[data-subscription-id]")?.dataset.subscriptionId);
+  }
 }
 
 function renderProfiles() {
@@ -1517,6 +1481,10 @@ async function runNetworkSafetyCheck() {
 }
 
 async function refreshAllSubscriptions() {
+  if (subscriptionRefreshing.size) {
+    toast("已有订阅正在刷新，请稍后再试", "info");
+    return;
+  }
   if (!store.subscriptions.length) {
     toast("当前没有远程订阅", "info");
     return;
@@ -1525,15 +1493,24 @@ async function refreshAllSubscriptions() {
   button.disabled = true;
   button.textContent = "正在刷新…";
   let updated = 0;
+  let failed = 0;
+  const subscriptionIds = store.subscriptions.map(({ profile }) => profile.id);
+  for (const id of subscriptionIds) subscriptionRefreshing.add(id);
+  renderSubscriptions();
   try {
-    for (const subscription of store.subscriptions) {
-      const result = await api.refreshProfile(subscription.profile.id);
-      if (result.updated) updated += 1;
+    for (const id of subscriptionIds) {
+      try {
+        const result = await api.refreshProfile(id);
+        if (result.updated) updated += 1;
+      } catch {
+        failed += 1;
+      } finally {
+        subscriptionRefreshing.delete(id);
+      }
     }
-    toast(`订阅刷新完成，${updated} 个配置有更新`, "success");
-  } catch (error) {
-    toast(errorMessage(error), "error");
+    toast(failed ? `刷新完成：${failed} 个失败，请查看对应卡片；${updated} 个配置有更新` : `订阅检查完成，${updated} 个配置有更新`, failed ? "error" : "success");
   } finally {
+    for (const id of subscriptionIds) subscriptionRefreshing.delete(id);
     button.disabled = false;
     button.textContent = "刷新全部";
     await refreshBase();
@@ -1544,6 +1521,7 @@ async function handleSubscriptionAction(target: HTMLElement) {
   const actionName = target.dataset.subscriptionAction;
   const profileId = target.dataset.profileId;
   if (!actionName || !profileId) return;
+  if (subscriptionRefreshing.has(profileId)) return;
   if (actionName === "versions") {
     store.selectedProfile = await api.profileDetails(profileId);
     renderProfiles();
@@ -1559,7 +1537,13 @@ async function handleSubscriptionAction(target: HTMLElement) {
     return;
   }
   if (actionName === "refresh") {
-    await action("订阅已更新并通过校验", () => api.refreshProfile(profileId));
+    subscriptionRefreshing.add(profileId);
+    renderSubscriptions();
+    try {
+      await action("订阅检查完成，用量以服务商返回信息为准", () => api.refreshProfile(profileId));
+    } finally {
+      subscriptionRefreshing.delete(profileId);
+    }
   } else if (actionName === "activate") {
     const activated = await action("", () => api.activateProfile(profileId));
     if (activated) toast("订阅已激活", "success");
@@ -2023,6 +2007,7 @@ async function runDiagnostics() {
 }
 
 const programManager = mountProgramManager($("#programs-view")!, { api, confirm: confirmAction, error: errorMessage });
+const localRouting = mountLocalRouting($("#routing-view")!, { api, confirm: confirmAction, error: errorMessage });
 mountProxyCompatibility($("#proxy-compatibility-panel")!, api.systemProxyCompatibility, errorMessage);
 
 const ruleManager = mountRuleManager($("#rules-view")!, {
@@ -2058,6 +2043,7 @@ function navigate(view: ViewName) {
   }
   if (view === "subscriptions") renderSubscriptions();
   if (view === "programs") void programManager.refresh();
+  if (view === "routing") void localRouting.refresh();
   if (view === "rules") {
     void ruleManager.refresh();
     if (store.runtime?.phase === "running") void refreshRules();
@@ -2286,6 +2272,15 @@ $("#node-details-modal")!.addEventListener("click", async (event) => {
 });
 
 document.addEventListener("keydown", (event) => {
+  if (event.key === "Tab" && !$("#confirmation-modal")!.classList.contains("is-hidden")) {
+    const controls = $$<HTMLButtonElement>("#confirmation-modal button:not(:disabled)");
+    const first = controls[0], last = controls[controls.length - 1];
+    if (first && last && ((event.shiftKey ? document.activeElement === first : document.activeElement === last)
+        || !$("#confirmation-modal")!.contains(document.activeElement))) {
+      event.preventDefault();
+      (event.shiftKey ? last : first)?.focus();
+    }
+  }
   if (event.key === "Escape" && !$("#confirmation-modal")!.classList.contains("is-hidden")) {
     closeConfirmation(false);
     return;

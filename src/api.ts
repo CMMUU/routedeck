@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { ThemePreference } from "./theme";
 import type {
+  RouteSettings,
+  RouteSnapshot,
   AppInfo,
   AppSettings,
   AppUpdateStatus,
@@ -32,6 +34,11 @@ import type {
 } from "./types";
 
 export const api = {
+  localRouteStatus: () => invoke<RouteSnapshot>("local_route_status"),
+  saveLocalRoute: (settings: RouteSettings, expectedRevision: number) => invoke<RouteSnapshot>("save_local_route", { settings, expectedRevision }),
+  setLocalRouteEnabled: (enabled: boolean, expectedRevision: number, confirmed: boolean) => invoke<RouteSnapshot>("set_local_route_enabled", { enabled, expectedRevision, confirmed }),
+  setCodexRoute: (attach: boolean, expectedConfigRevision: string, confirmed: boolean) => invoke<RouteSnapshot>("set_codex_route", { attach, expectedConfigRevision, confirmed }),
+  setOpenAiStability: (enabled: boolean, profileId: string, revisionId: string, confirmed: boolean) => invoke<void>("set_openai_stability", { enabled, profileId, revisionId, confirmed }),
   appInfo: () => invoke<AppInfo>("app_info"),
   checkAppUpdate: () => invoke<AppUpdateStatus>("check_app_update"),
   appUpdateStatus: () => invoke<AppUpdateStatus>("app_update_status"),

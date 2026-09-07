@@ -1,5 +1,5 @@
 use crate::error::{AppError, AppResult};
-use crate::models::SubscriptionMetadata;
+use crate::models::{SubscriptionMetadata, SubscriptionUsage};
 use futures_util::StreamExt;
 use reqwest::header::{
     ACCEPT, ACCEPT_LANGUAGE, CACHE_CONTROL, CONTENT_TYPE, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH,
@@ -15,6 +15,98 @@ const SUBSCRIPTION_ACCEPT: &str =
 const COMPATIBLE_USER_AGENTS: [&str; 2] =
     [DEFAULT_SUBSCRIPTION_USER_AGENT, "ClashforWindows/0.20.39"];
 const TOTAL_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Keep only recognized numeric fields. Never persist/log the raw header, which
+/// is untrusted and can contain account information or unexpected text.
+fn parse_subscription_usage(value: &str) -> Option<SubscriptionUsage> {
+    if value.len() > 4096 {
+        return None;
+    }
+    let mut fields = [None; 4];
+    let mut seen = [false; 4];
+    for field in value.split(';') {
+        let Some((name, value)) = field.split_once('=') else {
+            continue;
+        };
+        let index = match name.trim().to_ascii_lowercase().as_str() {
+            "upload" => 0,
+            "download" => 1,
+            "total" => 2,
+            "expire" => 3,
+            _ => continue,
+        };
+        if seen[index] {
+            // Ambiguous duplicate fields must not produce a plausible quota.
+            fields[index] = None;
+            continue;
+        }
+        seen[index] = true;
+        let value = value.trim();
+        let limit = if index == 3 {
+            253_402_300_799
+        } else {
+            9_007_199_254_740_991
+        };
+        // Byte counts and Unix seconds are integers. Reject signs, units,
+        // decimals, overflow and unsafe JavaScript integer values.
+        if !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()) {
+            fields[index] = value.parse::<u64>().ok().filter(|number| *number <= limit);
+        }
+    }
+    fields
+        .iter()
+        .any(Option::is_some)
+        .then_some(SubscriptionUsage {
+            upload_bytes: fields[0],
+            download_bytes: fields[1],
+            total_bytes: fields[2],
+            expires_at: fields[3],
+        })
+}
+
+fn response_usage(headers: &reqwest::header::HeaderMap) -> Option<SubscriptionUsage> {
+    let mut values = headers.get_all("subscription-userinfo").iter();
+    let value = values.next()?;
+    if values.next().is_some() {
+        return None;
+    }
+    value.to_str().ok().and_then(parse_subscription_usage)
+}
+
+/// Refresh history is shown long after the original request. Use only fixed
+/// summaries and a strictly parsed HTTP status; never forward an error payload.
+pub(crate) fn safe_subscription_error(error: &AppError) -> String {
+    let summary = match error {
+        AppError::Subscription(message) => {
+            if let Some(status) = message
+                .strip_prefix("HTTP ")
+                .and_then(|tail| {
+                    let code = tail.get(..3)?;
+                    (code.bytes().all(|byte| byte.is_ascii_digit())
+                        && tail.chars().nth(3).is_none_or(|ch| !ch.is_ascii_digit()))
+                    .then(|| code.parse::<u16>().ok())
+                    .flatten()
+                })
+                .filter(|code| (100..=599).contains(code))
+            {
+                return format!("订阅请求失败：HTTP {status}；已保留原配置和用量记录");
+            }
+            if message.contains("超时") || message.to_ascii_lowercase().contains("timed out") {
+                "订阅请求超时；已保留原配置和用量记录"
+            } else {
+                "订阅请求失败；已保留原配置和用量记录"
+            }
+        }
+        AppError::Config(_) | AppError::Runtime(_) => {
+            "订阅配置校验或应用失败；已保留原配置和用量记录"
+        }
+        AppError::Io(_) | AppError::NotFound(_) => "订阅本地数据读写失败；请检查本地记录",
+        AppError::Conflict(_) => "订阅更新遇到状态冲突；请稍后重试",
+        AppError::InvalidInput(_) => "订阅地址或请求参数无效；请检查订阅设置",
+        _ => "订阅更新未完成；请稍后重试",
+    };
+    summary.to_string()
+}
 
 fn subscription_transport_error(error: reqwest::Error) -> AppError {
     // Reqwest attaches the request URL to transport/body errors. Subscription
@@ -129,6 +221,7 @@ impl SubscriptionFetcher {
             )
         })?;
         if response.status() == reqwest::StatusCode::NOT_MODIFIED {
+            let usage = response_usage(response.headers());
             return Ok(FetchedSubscription {
                 content: None,
                 metadata: SubscriptionMetadata {
@@ -136,6 +229,7 @@ impl SubscriptionFetcher {
                     etag: etag.map(str::to_string),
                     last_modified: last_modified.map(str::to_string),
                     bytes: 0,
+                    usage,
                 },
                 not_modified: true,
             });
@@ -185,6 +279,7 @@ impl SubscriptionFetcher {
         Ok(FetchedSubscription {
             metadata: SubscriptionMetadata {
                 bytes: content.len(),
+                usage: response_usage(&headers),
                 content_type: headers
                     .get(CONTENT_TYPE)
                     .and_then(|value| value.to_str().ok())
@@ -224,7 +319,112 @@ fn is_loopback_host(url: &Url) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_subscription_url, SubscriptionFetcher};
+    use super::{
+        parse_subscription_usage, response_usage, safe_subscription_error,
+        validate_subscription_url, SubscriptionFetcher,
+    };
+    use crate::error::AppError;
+    use crate::models::SubscriptionMetadata;
+
+    #[test]
+    fn parses_usage_as_bytes_and_unix_seconds_without_defaulting_missing_fields() {
+        let usage = parse_subscription_usage(
+            " Upload = 0; DOWNLOAD=2048; total=4096; expire=1893456000; token=private",
+        )
+        .expect("usage");
+        assert_eq!(usage.upload_bytes, Some(0));
+        assert_eq!(usage.download_bytes, Some(2048));
+        assert_eq!(usage.total_bytes, Some(4096));
+        assert_eq!(usage.expires_at, Some(1893456000));
+        let partial = parse_subscription_usage("download=12").expect("partial");
+        assert_eq!(partial.upload_bytes, None);
+        assert_eq!(partial.total_bytes, None);
+        assert_eq!(partial.expires_at, None);
+        assert!(!serde_json::to_string(&usage)
+            .expect("json")
+            .contains("private"));
+    }
+
+    #[test]
+    fn malformed_ambiguous_and_out_of_range_usage_stays_unknown() {
+        for header in [
+            "",
+            "token=secret",
+            "upload=-1",
+            "total=1 GiB",
+            "download=NaN",
+            "upload=1.5",
+            "upload=18446744073709551616",
+            "total=9007199254740992",
+            "expire=253402300800",
+            "upload=1;upload=2;upload=3",
+        ] {
+            assert!(parse_subscription_usage(header).is_none(), "{header}");
+        }
+        assert!(parse_subscription_usage(&"x".repeat(4097)).is_none());
+        let usage = parse_subscription_usage("upload=1;UPLOAD=2;download=0;total=0;expire=0")
+            .expect("valid remaining fields");
+        assert_eq!(usage.upload_bytes, None);
+        assert_eq!(usage.download_bytes, Some(0));
+        assert_eq!(usage.total_bytes, Some(0));
+        assert_eq!(usage.expires_at, Some(0));
+    }
+
+    #[test]
+    fn legacy_metadata_does_not_invent_usage() {
+        let metadata: SubscriptionMetadata = serde_json::from_str(
+            r#"{"contentType":null,"etag":null,"lastModified":null,"bytes":2048}"#,
+        )
+        .expect("legacy metadata");
+        assert!(metadata.usage.is_none());
+        assert_eq!(metadata.bytes, 2048);
+    }
+
+    #[test]
+    fn missing_or_duplicate_http_usage_headers_are_unknown() {
+        use reqwest::header::{HeaderMap, HeaderValue};
+        let mut headers = HeaderMap::new();
+        assert!(response_usage(&headers).is_none());
+        headers.append(
+            "subscription-userinfo",
+            HeaderValue::from_static("download=100"),
+        );
+        assert_eq!(
+            response_usage(&headers).expect("one header").download_bytes,
+            Some(100)
+        );
+        headers.append(
+            "subscription-userinfo",
+            HeaderValue::from_static("download=200"),
+        );
+        assert!(response_usage(&headers).is_none());
+    }
+
+    #[test]
+    fn persistent_error_summaries_never_include_error_payloads() {
+        let secret = "https://private.example/sub?token=not-for-display";
+        for error in [
+            AppError::Subscription(format!("HTTP 403 ({secret})")),
+            AppError::Subscription(secret.into()),
+            AppError::Config(secret.into()),
+            AppError::Runtime(secret.into()),
+            AppError::Io(secret.into()),
+            AppError::Conflict(secret.into()),
+            AppError::InvalidInput(secret.into()),
+        ] {
+            let safe = safe_subscription_error(&error);
+            assert!(!safe.contains("private.example"));
+            assert!(!safe.contains("not-for-display"));
+        }
+        assert!(
+            safe_subscription_error(&AppError::Subscription("HTTP 403 rejected".into()))
+                .contains("HTTP 403")
+        );
+        assert!(
+            !safe_subscription_error(&AppError::Subscription("HTTP 403123 secret".into()))
+                .contains("HTTP")
+        );
+    }
 
     #[test]
     fn allows_https_and_local_http() {
@@ -251,7 +451,7 @@ mod tests {
             let _ = stream.read(&mut request).await;
             let body = "proxies: []\nrules: []\n";
             let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/yaml\r\nETag: fixture\r\nConnection: close\r\n\r\n{}",
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/yaml\r\nETag: fixture\r\nSubscription-Userinfo: upload=0; download=2048; total=4096; expire=1893456000\r\nConnection: close\r\n\r\n{}",
                 body.len(),
                 body
             );
@@ -268,7 +468,47 @@ mod tests {
             .await
             .expect("fetch");
         assert_eq!(result.metadata.etag.as_deref(), Some("fixture"));
+        assert_eq!(
+            result
+                .metadata
+                .usage
+                .as_ref()
+                .expect("usage")
+                .download_bytes,
+            Some(2048)
+        );
         assert!(result.content.expect("content").contains("proxies"));
+    }
+
+    #[tokio::test]
+    async fn not_modified_response_can_still_supply_fresh_quota() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("listener");
+        let address = listener.local_addr().expect("address");
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut request = [0u8; 1024];
+            let _ = stream.read(&mut request).await;
+            stream.write_all(b"HTTP/1.1 304 Not Modified\r\nSubscription-Userinfo: upload=5;download=100;total=1000\r\nConnection: close\r\n\r\n").await.expect("write");
+        });
+        let result = SubscriptionFetcher::new()
+            .expect("fetcher")
+            .fetch(
+                &format!("http://127.0.0.1:{}/subscription", address.port()),
+                "clash.meta",
+                Some("cached"),
+                None,
+            )
+            .await
+            .expect("fetch");
+        assert!(result.not_modified);
+        assert!(result.content.is_none());
+        assert_eq!(
+            result.metadata.usage.expect("fresh quota").download_bytes,
+            Some(100)
+        );
     }
 
     #[tokio::test]

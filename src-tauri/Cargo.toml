@@ -1,6 +1,6 @@
 [package]
 name = "routedeck"
-version = "0.7.2"
+version = "0.7.3"
 license = "GPL-3.0-only"
 description = "RouteDeck: lightweight cross-platform Mihomo desktop client"
 authors = ["cmmuu"]
@@ -27,7 +27,13 @@ tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream", "socks"] }
+bytes = "1"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1.20", features = ["tokio", "client-legacy"] }
+http-body-util = "0.1"
+tempfile = "3"
+toml_edit = "0.25"
 url = "2"
 chrono = { version = "0.4", features = ["serde", "clock"] }
 futures-util = "0.3"
@@ -35,7 +41,7 @@ rand = "0.9"
 regex = "1"
 sha2 = "0.10"
 thiserror = "2"
-tokio = { version = "1", features = ["time", "macros", "rt-multi-thread", "net", "io-util"] }
+tokio = { version = "1", features = ["time", "macros", "rt-multi-thread", "net", "io-util", "sync"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 sysinfo = "0.39.6"
 

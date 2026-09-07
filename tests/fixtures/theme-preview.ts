@@ -9,18 +9,21 @@ import type { InvokeArgs } from "@tauri-apps/api/core";
 import type {
   AppSettings, AppUpdateStatus, UpdateSource, ProfileDetails, ProfileRecord,
   UserRule, UserRulesState, UserRulesValidation,
-  ProgramInput, ProgramState,
+  ProgramInput, ProgramState, RouteSettings, RouteSnapshot,
+  SubscriptionMetadata, SubscriptionOverview, SubscriptionStatus,
 } from "../../src/types";
 import type { ThemePreference } from "../../src/theme";
 
 const STORAGE_KEY = "routedeck:test-fixture:theme-preview:v1";
 const RULES_STORAGE_KEY = "routedeck:test-fixture:user-rules:v1";
 const PROGRAMS_STORAGE_KEY = "routedeck:test-fixture:proxy-programs:v1";
-const previewWindows = new URLSearchParams(location.search).get("platform") === "windows";
+const previewQuery = new URLSearchParams(location.search);
+const previewWindows = previewQuery.get("platform") === "windows";
 // Screenshot-only layout; synthetic version labels and the fail-closed bridge remain.
-if (new URLSearchParams(location.search).get("presentation") === "1") {
+if (previewQuery.get("presentation") === "1" || previewQuery.get("glass") === "1") {
   document.documentElement.dataset.fixturePresentation = "true";
 }
+document.documentElement.dataset.fixtureGlass = String(previewQuery.get("glass") === "1");
 const THEMES: readonly ThemePreference[] = ["system", "light", "dark", "purple"];
 type FixtureState = { theme: ThemePreference; systemDark: boolean };
 
@@ -62,6 +65,89 @@ let cancelUpdateDownload = false;
 let updateInstallCount = 0;
 let appearanceSettings = { launchAtLogin: false, showGlobalTraffic: true, diagnosticsRetentionDays: 7 };
 let settingsSaveCount = 0;
+
+// In-memory scenarios only: no persisted Codex config, native IPC or sockets.
+// Dispatch `routedeck-fixture-routing` with { scenario, ...options } and refresh
+// to exercise the real UI. Counters make cancelled confirmations observable.
+function initialRoute(): RouteSnapshot {
+  return {
+    revision: 1, enabled: false, running: false,
+    settings: { listenPort: 15731, mode: "compatible", upstream: "chatgpt", outboundProxy: "" },
+    endpoint: "http://127.0.0.1:15731", requests: 0, active: 0, completed: 0, failed: 0,
+    lastStatus: 0, lastError: null,
+    codex: { configRevision: "fixture-config-1", attached: false, hasBackup: false, provider: "openai", endpoint: null, warning: null, backupPath: null },
+    stability: { enabled: false, running: false, eligible: false, profileId: null, revisionId: null, current: null, lastSwitch: null,
+      message: "隔离合成状态：尚无托管节点；没有执行网络或模型验证。", nodes: [] },
+  };
+}
+let route = initialRoute();
+let routeConfigRevision = 1;
+let routeFailRead = false, routeFailSave = false, routeFailStart = false, routeRestoreConflict = false;
+const routeCalls = { reads: 0, saves: 0, enables: 0, bindings: 0, stability: 0 };
+function reportRoute() {
+  document.documentElement.dataset.fixtureRoutingState = JSON.stringify(route);
+  document.documentElement.dataset.fixtureRoutingCalls = JSON.stringify(routeCalls);
+}
+function routeError(code: "INVALID_INPUT" | "STATE_CONFLICT" | "IO_ERROR" | "RUNTIME_ERROR", message: string) {
+  return { code, stage: "fixture_local_routing", message: `隔离合成状态：${message}`, retryable: code !== "INVALID_INPUT" };
+}
+function configRevision() { route.codex.configRevision = `fixture-config-${++routeConfigRevision}`; }
+function attachFixtureRoute() {
+  route.codex = { ...route.codex, attached: true, hasBackup: true, provider: "routedeck_local",
+    endpoint: `${route.endpoint}/v1`, backupPath: "C:\\fixture-only\\codex-config.backup.toml",
+    warning: "合成接入配置，仅用于交互预览；未读取或更改真实 Codex 配置，也未验证模型连接。" };
+  configRevision();
+}
+function restoreFixtureRoute() {
+  if (routeRestoreConflict) throw routeError("STATE_CONFLICT", "接入字段已被其他程序修改；保留备份并停止恢复，请核对原配置。");
+  route.codex = { ...initialRoute().codex, configRevision: route.codex.configRevision };
+  configRevision();
+}
+function routeScenario(detail: Record<string, unknown>) {
+  if (typeof detail.scenario === "string") {
+    route = initialRoute(); routeConfigRevision = 1;
+    routeFailRead = routeFailSave = routeFailStart = routeRestoreConflict = false;
+    if (["running", "attached", "active", "restore-conflict"].includes(detail.scenario)) {
+      route.enabled = route.running = true;
+    }
+    if (["attached", "active", "restore-conflict"].includes(detail.scenario)) attachFixtureRoute();
+    if (detail.scenario === "active") route.requests = route.active = 1;
+    if (detail.scenario === "restore-conflict") {
+      routeRestoreConflict = true; route.codex.attached = false;
+      route.codex.warning = "隔离合成冲突：其他程序已修改接入字段；恢复时会拒绝覆盖。";
+    }
+    if (detail.scenario === "read-failed") routeFailRead = true;
+    if (detail.scenario === "start-failed") routeFailStart = true;
+    if (detail.scenario === "eligible") detail.eligible = true;
+  }
+  for (const key of ["requests", "active", "completed", "failed", "lastStatus"] as const) {
+    if (typeof detail[key] === "number" && Number.isSafeInteger(detail[key]) && detail[key] >= 0) route[key] = detail[key];
+  }
+  if (typeof detail.lastError === "string" || detail.lastError === null) route.lastError = detail.lastError;
+  if (typeof detail.failRead === "boolean") routeFailRead = detail.failRead;
+  if (typeof detail.failSave === "boolean") routeFailSave = detail.failSave;
+  if (typeof detail.failStart === "boolean") routeFailStart = detail.failStart;
+  if (typeof detail.restoreConflict === "boolean") routeRestoreConflict = detail.restoreConflict;
+  if (detail.externalUpdate) { route.revision++; route.settings.listenPort = 15732; route.endpoint = "http://127.0.0.1:15732"; }
+  if (detail.externalConfigUpdate) configRevision();
+  if (typeof detail.eligible === "boolean") {
+    route.stability.eligible = detail.eligible;
+    route.stability.profileId = detail.eligible ? "fixture-active" : null;
+    route.stability.revisionId = detail.eligible ? "fixture-active-revision" : null;
+    route.stability.message = detail.eligible ? "隔离合成策略可用；尚无模型样本，不代表连接已验证。" : initialRoute().stability.message;
+    if (!detail.eligible) route.stability.enabled = route.stability.running = false;
+  }
+  reportRoute();
+}
+window.addEventListener("routedeck-fixture-routing", event => {
+  const detail = (event as CustomEvent<Record<string, unknown>>).detail;
+  if (!detail || typeof detail !== "object") return;
+  routeScenario({ ...detail });
+  // Opt-in refresh preserves the UI's dirty draft/conflict logic.
+  if (detail.refresh === true) document.querySelector<HTMLButtonElement>("#local-route-refresh")?.click();
+});
+if (previewQuery.has("routeScenario")) routeScenario({ scenario: previewQuery.get("routeScenario") });
+reportRoute();
 window.addEventListener("routedeck-fixture-update", (event) => { updateScenario = (event as CustomEvent).detail.scenario; });
 window.addEventListener("routedeck-fixture-programs", (event) => {
   const detail = (event as CustomEvent).detail;
@@ -367,10 +453,85 @@ function makeProfile(id: string, displayName: string, enabled: boolean): Profile
   };
 }
 
-const profiles = [
-  makeProfile("fixture-active", "演示订阅 · 活动", true),
-  makeProfile("fixture-inactive", "演示订阅 · 备用（可预览删除弹窗）", false),
-];
+// Every record is synthetic, including usage and provider error text. Neither
+// scenario changes nor the three mock actions read a subscription or touch the
+// live core, proxy settings, active desktop profile, or native filesystem.
+let profiles: ProfileRecord[] = [];
+let activeProfileId: string | null = null;
+const subscriptionCalls = { reads: 0, refresh: 0, activate: 0, delete: 0 };
+const subscriptionSamples = new Map<string, {
+  metadata: SubscriptionMetadata;
+  fetchedAt: string;
+  status?: SubscriptionStatus;
+}>();
+const subscriptionStamp = "2026-09-07T08:00:00.000Z";
+const staleSubscriptionStamp = "2026-09-01T08:00:00.000Z";
+const fixtureSubscriptionError = "订阅请求失败：HTTP 403。订阅服务拒绝访问；请检查订阅是否有效或联系服务商。";
+
+function subscriptions(): SubscriptionOverview[] {
+  return profiles.map(profile => {
+    const sample = subscriptionSamples.get(profile.id);
+    return {
+      profile: structuredClone(profile), summary: structuredClone(summary), revisionCount: 1,
+      latestFetchedAt: sample?.fetchedAt ?? stamp,
+      latestMetadata: structuredClone(sample?.metadata ?? metadata),
+      latestValidation: structuredClone(validation), active: profile.id === activeProfileId,
+      ...(sample?.status ? { status: structuredClone(sample.status) } : {}),
+    };
+  });
+}
+
+function reportSubscriptions() {
+  document.documentElement.dataset.fixtureSubscriptionsState = JSON.stringify(subscriptions());
+  document.documentElement.dataset.fixtureSubscriptionsCalls = JSON.stringify(subscriptionCalls);
+}
+
+function subscriptionScenario(scenario: string) {
+  subscriptionSamples.clear();
+  profiles = scenario === "empty" ? [] : [
+    makeProfile("fixture-active", "演示订阅 · 活动", true),
+    makeProfile("fixture-inactive", "演示订阅 · 备用（可预览删除弹窗）", false),
+  ];
+  activeProfileId = profiles[0]?.id ?? null;
+  if (scenario === "cards") {
+    const gib = 1024 ** 3;
+    profiles = [
+      makeProfile("fixture-active", "日常通勤 · 合成订阅", true),
+      makeProfile("fixture-inactive", "备用线路 · 已过期示例", false),
+      makeProfile("fixture-no-usage", "团队节点 · 未提供用量", false),
+      makeProfile("fixture-stale", "旅行备用 · 上次采样", false),
+    ];
+    const usages = [
+      { uploadBytes: 12 * gib, downloadBytes: 58 * gib, totalBytes: 200 * gib, expiresAt: Date.parse("2026-10-07T00:00:00Z") / 1000 },
+      { uploadBytes: 12 * gib, downloadBytes: 103 * gib, totalBytes: 100 * gib, expiresAt: Date.parse("2026-09-01T00:00:00Z") / 1000 },
+      null,
+      { uploadBytes: 4 * gib, downloadBytes: 38 * gib, totalBytes: 100 * gib, expiresAt: Date.parse("2026-10-01T00:00:00Z") / 1000 },
+    ];
+    profiles.forEach((profile, index) => {
+      const usage = usages[index];
+      const stale = profile.id === "fixture-stale";
+      profile.updatedAt = stale ? staleSubscriptionStamp : subscriptionStamp;
+      profile.source = { type: "remote_subscription", host: `${["daily", "backup", "team", "travel"][index]}.example.invalid`, userAgent: "fixture-only" };
+      subscriptionSamples.set(profile.id, {
+        metadata: { ...metadata, usage },
+        fetchedAt: stale ? staleSubscriptionStamp : subscriptionStamp,
+        status: {
+          checkedAt: subscriptionStamp, lastError: stale ? fixtureSubscriptionError : null,
+          usage, usageUpdatedAt: usage ? stale ? staleSubscriptionStamp : subscriptionStamp : null,
+        },
+      });
+    });
+  }
+  reportSubscriptions();
+}
+
+window.addEventListener("routedeck-fixture-subscriptions", event => {
+  const detail = (event as CustomEvent<{ scenario?: string; refresh?: boolean }>).detail;
+  if (!detail || !["cards", "empty"].includes(detail.scenario ?? "")) return;
+  subscriptionScenario(detail.scenario!);
+  if (detail.refresh === true) document.querySelector<HTMLButtonElement>("#subscriptions-refresh-list")?.click();
+});
+subscriptionScenario(previewQuery.get("subscriptionScenario") ?? "default");
 
 function profileDetails(profileId: string): ProfileDetails {
   const profile = profiles.find((entry) => entry.id === profileId);
@@ -384,8 +545,8 @@ function profileDetails(profileId: string): ProfileDetails {
       profileId: profile.id,
       sourceSha256: "0".repeat(64),
       effectiveSha256: "1".repeat(64),
-      fetchedAt: stamp,
-      subscription: metadata,
+      fetchedAt: subscriptionSamples.get(profile.id)?.fetchedAt ?? stamp,
+      subscription: structuredClone(subscriptionSamples.get(profile.id)?.metadata ?? metadata),
       validation,
       openaiPolicy: profile.openaiPolicy,
     }],
@@ -422,9 +583,9 @@ const readonlyReplies: Record<string, () => unknown> = {
   system_proxy_status: () => ({ active: false, snapshotPath: null, platform: "macos" }),
   tun_helper_status: () => ({ supported: true, state: "not_installed", message: "合成预览不安装或调用 Helper", protocolVersion: 1, runtimeRunning: false, runtimePid: null, runtimeVersion: null, lastError: null }),
   global_traffic_snapshot: () => ({ enabled: true, uploadBytesPerSecond: 32000, downloadBytesPerSecond: 2400000, sampledAt: stamp, interfaces: ["fixture-only"] }),
-  list_profiles: () => profiles,
-  list_subscriptions: () => profiles.map((profile, index) => ({ profile, summary, revisionCount: 1, latestFetchedAt: stamp, latestMetadata: metadata, latestValidation: validation, active: index === 0 })),
-  get_active_profile: () => profileDetails(profiles[0].id),
+  list_profiles: () => structuredClone(profiles),
+  list_subscriptions: () => { subscriptionCalls.reads++; reportSubscriptions(); return subscriptions(); },
+  get_active_profile: () => activeProfileId ? profileDetails(activeProfileId) : null,
   get_openai_policy_task: () => ({ running: false, profileId: null, phase: "idle", completed: 0, total: 0, message: "合成预览不执行健康检测", startedAt: null, finishedAt: null, error: null, result: null }),
   get_proxies: () => ({ proxies: {
     "演示节点选择": { type: "Selector", all: policy.selectedNodes.map((node) => node.name), now: policy.selectedNodes[0].name, udp: true },
@@ -460,6 +621,112 @@ function payloadRecord(payload: InvokeArgs | undefined): Record<string, unknown>
 
 mockIPC(async (command, payload) => {
   const args = payloadRecord(payload);
+  if (["refresh_profile", "activate_profile", "delete_profile"].includes(command)) {
+    const action = command === "refresh_profile" ? "refresh" : command === "activate_profile" ? "activate" : "delete";
+    subscriptionCalls[action]++;
+    reportSubscriptions();
+    const profile = profiles.find(entry => entry.id === args.profileId);
+    if (!profile) throw ruleError("NOT_FOUND", "隔离合成订阅不存在；未访问真实配置。");
+    if (command === "refresh_profile") {
+      await new Promise(resolve => window.setTimeout(resolve, 120));
+      // A scenario switch during the mock delay must not resurrect old data.
+      if (!profiles.includes(profile)) throw ruleError("STATE_CONFLICT", "隔离订阅场景已切换，请重新读取列表。");
+      const previous = subscriptionSamples.get(profile.id);
+      const checkedAt = new Date().toISOString();
+      const usage = previous?.status?.usage ?? previous?.metadata.usage ?? null;
+      const failed = profile.id === "fixture-stale";
+      subscriptionSamples.set(profile.id, {
+        metadata: structuredClone(previous?.metadata ?? metadata),
+        fetchedAt: failed ? previous?.fetchedAt ?? stamp : checkedAt,
+        status: {
+          checkedAt, lastError: failed ? fixtureSubscriptionError : null, usage,
+          usageUpdatedAt: usage ? failed ? previous?.status?.usageUpdatedAt ?? previous?.fetchedAt ?? stamp : checkedAt : null,
+        },
+      });
+      reportSubscriptions();
+      if (failed) throw { code: "SUBSCRIPTION_ERROR", stage: "fixture_subscription", message: fixtureSubscriptionError, retryable: false };
+      const details = profileDetails(profile.id);
+      return { profile: structuredClone(profile), revision: details.revisions[0], summary: structuredClone(summary), updated: false };
+    }
+    if (command === "activate_profile") {
+      if (activeProfileId === profile.id) throw ruleError("STATE_CONFLICT", "该合成订阅已在使用，无需重复激活。");
+      if (args.revisionId && args.revisionId !== `${profile.id}-revision`) throw ruleError("NOT_FOUND", "隔离订阅版本不存在。");
+      activeProfileId = profile.id;
+      reportSubscriptions();
+      return profileDetails(profile.id); // In-memory selection only; never start a core.
+    }
+    if (activeProfileId === profile.id) throw ruleError("STATE_CONFLICT", "当前合成订阅正在使用，请先激活其他订阅后再删除。");
+    profiles = profiles.filter(entry => entry.id !== profile.id);
+    subscriptionSamples.delete(profile.id);
+    reportSubscriptions();
+    return;
+  }
+  if (command === "local_route_status") {
+    routeCalls.reads++; reportRoute();
+    if (routeFailRead) throw routeError("IO_ERROR", "模拟读取路由状态失败；未访问本机服务。");
+    return structuredClone(route);
+  }
+  if (command === "save_local_route") {
+    routeCalls.saves++; reportRoute();
+    if (args.expectedRevision !== route.revision) throw routeError("STATE_CONFLICT", "路由设置已更新，未覆盖其他修改；当前草稿保留。");
+    if (route.enabled || route.codex.hasBackup) throw routeError("STATE_CONFLICT", "请先恢复 Codex 接入并关闭路由再修改设置。");
+    const value = args.settings as RouteSettings | undefined;
+    if (!value || !Number.isInteger(value.listenPort) || value.listenPort < 1024 || value.listenPort > 65535
+      || !["compatible", "native"].includes(value.mode) || !["chatgpt", "openai_api"].includes(value.upstream)
+      || typeof value.outboundProxy !== "string") throw routeError("INVALID_INPUT", "路由设置格式无效。");
+    if (value.outboundProxy) {
+      try {
+        const proxy = new URL(value.outboundProxy);
+        if (!["http:", "https:", "socks5:", "socks5h:"].includes(proxy.protocol)
+          || !["localhost", "127.0.0.1", "[::1]"].includes(proxy.hostname)
+          || !proxy.port || Number(proxy.port) === value.listenPort || proxy.username || proxy.password
+          || proxy.search || proxy.hash || !["", "/"].includes(proxy.pathname)) throw new Error("invalid");
+      } catch { throw routeError("INVALID_INPUT", "出站代理只接受本机明确端口，不接受账号、路径或路由自身。"); }
+    }
+    await new Promise(resolve => window.setTimeout(resolve, 120));
+    if (args.expectedRevision !== route.revision) throw routeError("STATE_CONFLICT", "保存期间路由版本已变化；没有覆盖新版本。");
+    if (routeFailSave) { routeFailSave = false; throw routeError("IO_ERROR", "模拟保存失败，旧设置与运行状态保留。"); }
+    route.settings = structuredClone(value); route.endpoint = `http://127.0.0.1:${value.listenPort}`; route.revision++;
+    reportRoute(); return structuredClone(route); // Save never starts or attaches.
+  }
+  if (command === "set_local_route_enabled") {
+    routeCalls.enables++; reportRoute();
+    if (args.confirmed !== true || typeof args.enabled !== "boolean") throw routeError("INVALID_INPUT", "需要单独确认启动或关闭路由。");
+    if (args.expectedRevision !== route.revision) throw routeError("STATE_CONFLICT", "路由设置已更新，请刷新后重新确认。");
+    if (!args.enabled && route.active > 0) throw routeError("STATE_CONFLICT", "存在进行中请求，未恢复配置或关闭服务。");
+    if (args.enabled && routeFailStart) {
+      routeFailStart = false; route.enabled = true; route.running = false; route.revision++;
+      route.lastError = "隔离合成错误：监听端口被占用，未创建任何真实监听端口。";
+      reportRoute(); throw routeError("RUNTIME_ERROR", "模拟启动失败：监听端口已被占用。");
+    }
+    if (!args.enabled && route.codex.hasBackup) restoreFixtureRoute();
+    route.enabled = route.running = args.enabled; route.lastError = null; route.revision++;
+    reportRoute(); return structuredClone(route);
+  }
+  if (command === "set_codex_route") {
+    routeCalls.bindings++; reportRoute();
+    if (args.confirmed !== true || typeof args.attach !== "boolean") throw routeError("INVALID_INPUT", "接入与恢复需要独立确认。");
+    if (args.expectedConfigRevision !== route.codex.configRevision) throw routeError("STATE_CONFLICT", "Codex 配置版本已变化；未覆盖其他修改。");
+    if (route.active > 0) throw routeError("STATE_CONFLICT", "存在进行中请求，未改变接入配置。");
+    if (args.attach) {
+      if (!route.running || route.codex.hasBackup) throw routeError("STATE_CONFLICT", "请先单独启动路由，已有接入备份时不能重复接入。");
+      attachFixtureRoute();
+    } else {
+      if (!route.codex.hasBackup) throw routeError("STATE_CONFLICT", "没有 RouteDeck 接入备份可恢复。");
+      restoreFixtureRoute();
+    }
+    reportRoute(); return structuredClone(route);
+  }
+  if (command === "set_openai_stability") {
+    routeCalls.stability++; reportRoute();
+    if (args.confirmed !== true || typeof args.enabled !== "boolean") throw routeError("INVALID_INPUT", "稳定策略需要独立确认。");
+    if (!route.stability.eligible || args.profileId !== route.stability.profileId || args.revisionId !== route.stability.revisionId)
+      throw routeError("STATE_CONFLICT", "当前灾备配置不可用或已更新，请刷新后重新确认。");
+    route.stability.enabled = route.stability.running = args.enabled;
+    route.stability.revisionId = `fixture-stability-${routeCalls.stability}`;
+    route.stability.message = "隔离合成策略状态；没有探测节点、切换真实连接或验证模型流。";
+    reportRoute(); return;
+  }
   // UI-only settings save is synthetic. Port/mode changes remain fail-closed.
   if (command === "update_settings") {
     const value = args.settings as AppSettings;
@@ -586,7 +853,7 @@ mockIPC(async (command, payload) => {
   // This includes start/stop, subscribe, settings/network changes and probes.
   networkMutationCount += 1;
   report(`已拦截真实状态修改调用：${command}`);
-  throw new Error(`FIXTURE_ONLY: 已拦截 ${command}；此预览仅允许合成数据、隔离主题和规则保存`);
+  throw new Error(`FIXTURE_ONLY: 已拦截 ${command}；此预览仅允许合成数据与隔离交互状态`);
 }, { shouldMockEvents: true });
 
 // Supply a stable, mutable color-scheme MediaQueryList before main.ts imports.
@@ -685,9 +952,25 @@ element("fixture-reset").addEventListener("click", () => {
 });
 
 const banner = element("fixture-banner");
-new ResizeObserver(() => {
-  document.documentElement.style.setProperty("--fixture-banner-height", `${banner.offsetHeight}px`);
-}).observe(banner);
+const fixtureTitlebar = element("fixture-titlebar");
+let fixtureChromeFrame: number | null = null;
+let fixtureChromeHeight = -1;
+function scheduleFixtureChromeSize() {
+  if (fixtureChromeFrame !== null) return;
+  // A root style write can resize an observed banner. Defer it outside the
+  // ResizeObserver delivery cycle and never rewrite an unchanged measurement.
+  fixtureChromeFrame = window.requestAnimationFrame(() => {
+    fixtureChromeFrame = null;
+    const height = banner.offsetHeight + fixtureTitlebar.offsetHeight;
+    if (height === fixtureChromeHeight) return;
+    fixtureChromeHeight = height;
+    document.documentElement.style.setProperty("--fixture-banner-height", `${height}px`);
+  });
+}
+const fixtureChromeResize = new ResizeObserver(scheduleFixtureChromeSize);
+fixtureChromeResize.observe(banner);
+fixtureChromeResize.observe(fixtureTitlebar);
+scheduleFixtureChromeSize();
 
 window.addEventListener("error", (event) => {
   runtimeErrorCount += 1;
@@ -700,7 +983,10 @@ window.addEventListener("unhandledrejection", (event) => {
 
 report("隔离桥接已安装，正在加载真实 src/main.ts");
 void import("../../src/main").then(() => {
-  report("预览已就绪；可测试主题、用户规则、文本校验、应用失败与版本冲突");
+  // Navigation only, never a command or actual application launch.
+  const view = previewQuery.get("view");
+  if (view === "routing" || view === "subscriptions") document.querySelector<HTMLButtonElement>(`[data-view="${view}"]`)?.click();
+  report("预览已就绪；可测试主题、规则、路由合成状态、独立确认、失败与版本冲突");
 }).catch((error: unknown) => {
   runtimeErrorCount += 1;
   report(`前端加载失败：${error instanceof Error ? error.message : String(error)}`);

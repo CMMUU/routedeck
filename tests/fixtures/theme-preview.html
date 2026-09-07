@@ -8,7 +8,7 @@
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; object-src 'none'; base-uri 'none'; form-action 'none'"
     />
-    <title>RouteDeck · 隔离主题与规则预览</title>
+    <title>RouteDeck · 隔离界面与路由预览</title>
     <link rel="icon" type="image/png" href="../../assets/brand/app-icon-128.png" />
     <style>
       #fixture-banner {
@@ -43,9 +43,36 @@
       html body #app { min-height: 0; height: calc(100vh - var(--fixture-banner-height, 74px)); }
       html body #app .app-shell { height: 100%; }
       html[data-fixture-presentation="true"] #fixture-banner { display: none; }
+      #fixture-titlebar { display: none; }
+      html[data-fixture-presentation="true"] #fixture-titlebar {
+        height: 40px;
+        box-sizing: border-box;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-left: 16px;
+        color: var(--text, #242b38);
+        background: var(--glass-titlebar, var(--header-background, rgba(244, 247, 252, .92)));
+        border-bottom: 1px solid var(--line, rgba(97, 112, 138, .14));
+        font: 13px/1.4 "Segoe UI", "Microsoft YaHei UI", sans-serif;
+      }
+      #fixture-titlebar .fixture-title-brand { display: flex; align-items: center; gap: 8px; }
+      #fixture-titlebar img { width: 18px; height: 18px; }
+      #fixture-titlebar .fixture-title-note { margin-inline: 12px; color: var(--muted, #576173); }
+      #fixture-titlebar .fixture-window-glyphs { display: flex; height: 100%; flex: none; }
+      #fixture-titlebar .fixture-window-glyphs span { width: 46px; display: grid; place-items: center; }
+      @media (max-width: 520px) {
+        #fixture-titlebar .fixture-window-glyphs span { width: 26px; }
+        #fixture-titlebar .fixture-title-note { margin-inline: 6px; font-size: 12px; }
+      }
     </style>
   </head>
   <body>
+    <div id="fixture-titlebar" aria-label="合成 Windows 标题栏，无窗口操作">
+      <span class="fixture-title-brand"><img src="../../assets/brand/app-icon-128.png" alt="" />RouteDeck</span>
+      <span class="fixture-title-note">隔离预览 · 非实时状态</span>
+      <span class="fixture-window-glyphs" aria-hidden="true"><span>−</span><span>□</span><span>×</span></span>
+    </div>
     <aside id="fixture-banner" aria-label="隔离测试控制台">
       <div>
         <strong>仅合成数据 · 真实应用界面</strong>

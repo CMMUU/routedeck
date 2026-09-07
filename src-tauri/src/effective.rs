@@ -279,11 +279,28 @@ fn apply_openai_policy(
         "name",
         Value::String(OPENAI_GROUP_NAME.to_string()),
     );
-    insert(&mut group, "type", Value::String("fallback".to_string()));
+    insert(
+        &mut group,
+        "type",
+        Value::String(
+            if policy.stability_enabled {
+                "select"
+            } else {
+                "fallback"
+            }
+            .to_string(),
+        ),
+    );
     insert(
         &mut group,
         "proxies",
-        Value::Sequence(selected.into_iter().map(Value::String).collect()),
+        Value::Sequence(
+            selected
+                .into_iter()
+                .chain(policy.stability_enabled.then(|| "REJECT".to_string()))
+                .map(Value::String)
+                .collect(),
+        ),
     );
     insert(
         &mut group,
@@ -452,7 +469,7 @@ rules:
 
     #[test]
     fn injects_openai_fallback_and_priority_rules() {
-        let policy = OpenAiPolicy {
+        let mut policy = OpenAiPolicy {
             enabled: true,
             auto_maintain: true,
             selected_nodes: vec![node("sample", 96.0), node("sample-2", 88.0)],
@@ -514,6 +531,31 @@ rules:
             first_rule,
             format!("DOMAIN-SUFFIX,openai.com,{OPENAI_GROUP_NAME}")
         );
+        policy.stability_enabled = true;
+        let stable = build_effective_config_with_policy(
+            &source,
+            &AppSettings::default(),
+            RoutingMode::Rule,
+            Some(&policy),
+        )
+        .unwrap();
+        let stable_doc: Value = serde_yaml::from_str(&stable.yaml).unwrap();
+        assert_eq!(
+            stable_doc["proxy-groups"][0]["type"].as_str(),
+            Some("select")
+        );
+        let candidates = stable_doc["proxy-groups"][0]["proxies"]
+            .as_sequence()
+            .unwrap();
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(candidates.last().and_then(Value::as_str), Some("REJECT"));
+        if let Some(binary) = std::env::var_os("MIHOMO_TEST_BINARY") {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("stable-selector.yaml");
+            std::fs::write(&path, stable.yaml).unwrap();
+            crate::runtime::validate_file(std::path::Path::new(&binary), root.path(), &path)
+                .expect("native stable selector");
+        }
     }
 
     #[test]

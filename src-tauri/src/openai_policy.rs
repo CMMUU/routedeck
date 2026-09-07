@@ -298,7 +298,10 @@ async fn generate_and_apply(
     }
     check_cancelled(app)?;
 
-    let policy = benchmark_nodes(app, &source, candidates, auto_maintain).await?;
+    let mut policy = benchmark_nodes(app, &source, candidates, auto_maintain).await?;
+    if profile.openai_policy.last_benchmarked_at.is_some() {
+        policy.stability_enabled = profile.openai_policy.stability_enabled;
+    }
     check_cancelled(app)?;
     update_progress(
         app,
@@ -318,7 +321,7 @@ async fn generate_and_apply(
     Ok(policy)
 }
 
-async fn apply_policy_revision(
+pub(crate) async fn apply_policy_revision(
     app: &AppHandle,
     profile_id: Uuid,
     policy: &OpenAiPolicy,
@@ -549,6 +552,7 @@ async fn benchmark_nodes(
         return Err(AppError::Runtime("综合检测后少于 2 个可用节点".to_string()));
     }
     Ok(OpenAiPolicy {
+        stability_enabled: true,
         enabled: true,
         auto_maintain,
         max_nodes: SELECTED_NODES as u8,

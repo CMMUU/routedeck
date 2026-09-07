@@ -65,6 +65,8 @@ jobs:
       - run: npm run test:update
       - run: npm run test:rules
       - run: npm run test:programs
+      - run: npm run test:routing
+      - run: npm run test:subscriptions
       - run: npm run core:prepare
       - run: npm run test:core
       - run: npm run build

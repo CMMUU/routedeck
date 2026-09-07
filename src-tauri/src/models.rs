@@ -32,6 +32,8 @@ pub struct OpenAiNodeScore {
 #[serde(rename_all = "camelCase")]
 pub struct OpenAiPolicy {
     #[serde(default)]
+    pub stability_enabled: bool,
+    #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
     pub auto_maintain: bool,
@@ -52,6 +54,7 @@ pub struct OpenAiPolicy {
 impl Default for OpenAiPolicy {
     fn default() -> Self {
         Self {
+            stability_enabled: false,
             enabled: false,
             auto_maintain: false,
             max_nodes: default_openai_max_nodes(),
@@ -317,6 +320,27 @@ pub struct SubscriptionMetadata {
     pub etag: Option<String>,
     pub last_modified: Option<String>,
     pub bytes: usize,
+    #[serde(default)]
+    pub usage: Option<SubscriptionUsage>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SubscriptionUsage {
+    pub upload_bytes: Option<u64>,
+    pub download_bytes: Option<u64>,
+    pub total_bytes: Option<u64>,
+    /// Unix seconds supplied by the subscription server, not milliseconds.
+    pub expires_at: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SubscriptionStatus {
+    pub checked_at: Option<DateTime<Utc>>,
+    pub last_error: Option<String>,
+    pub usage: Option<SubscriptionUsage>,
+    pub usage_updated_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
