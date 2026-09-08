@@ -37,9 +37,20 @@ CI 仅检查，不存储 Cloudflare 凭据，也不会自动登录或部署。�
 
 ## 下载快照与更新
 
-当前固定为 **2026-09-08 核验的 v0.7.3**。六个 GitHub 主包存在；Gitee 仅 Windows ARM64 EXE、macOS ARM64 DMG 两个所选主包可用。Linux 仍可能有 DEB/RPM，界面仅说明当前所选 AppImage 的缺失。
+当前固定为 **2026-09-08 核验的 v0.7.4**。Windows x64 / ARM64 EXE、macOS x64 / ARM64 DMG、Linux x64 / ARM64 AppImage 六个主包，在 GitHub 与 Gitee 均返回 HEAD 200，且两渠道对应文件的 Content-Length 一致。这是下载可用性与元数据核验，不代表在本次检查中下载大包执行了独立哈希校验。
+
+| 主包文件名 | 两渠道共同大小（字节） |
+| --- | ---: |
+| `RouteDeck_0.7.4_x64-setup.exe` | 17,930,016 |
+| `RouteDeck_0.7.4_arm64-setup.exe` | 15,142,742 |
+| `RouteDeck_0.7.4_x64.dmg` | 27,476,395 |
+| `RouteDeck_0.7.4_aarch64.dmg` | 25,155,985 |
+| `RouteDeck_0.7.4_amd64.AppImage` | 100,559,352 |
+| `RouteDeck_0.7.4_aarch64.AppImage` | 97,118,728 |
 
 有同版本、同架构、同格式的国内主包时，将国内直链置为主要操作；其余情况明确提示缺失，主要操作改为已核验 GitHub 包。不会静默换成另一个版本或格式。
+
+当前六个选项均为国内主操作、GitHub 备用；无 JavaScript 时也保留 Windows x64 国内 EXE 直链和 GitHub 备用，禁用无法工作的系统与架构选择器。离线测试另外在 VM 内模拟国内包全部缺失或仅部分可用，持续验证格式提示、GitHub 回退和主操作 DOM 顺序，不向生产代码增加测试接口。
 
 新版本发布后，必须先核对 GitHub Release、Gitee API、具体文件的 HEAD 状态及大小，再同步修改 `public/site.js` 的 release 快照、首页无 JavaScript 降级链接/版本文字和 `scripts/test-downloads.mjs` 的独立预期值。未发布的源码版本、标签或存在的签名文件，不是包已存在的证据。国内链接不齐时不谎报镜像成功。
 

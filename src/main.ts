@@ -5,6 +5,7 @@ import "./subscription-cards.css";
 import { subscriptionCardMarkup } from "./subscription-cards";
 import { NAV_ITEMS, navigationMarkup, type ViewName } from "./ui";
 import { preferencesMarkup } from "./settings-view";
+import { canStartRuntime, startRuntimeInMode, type RuntimeStartMode } from "./runtime-start";
 import { api, errorMessage, revisionLabel } from "./api";
 import { describeAppUpdate } from "./app-update";
 import { listen } from "@tauri-apps/api/event";
@@ -117,6 +118,8 @@ const subscriptionRefreshing = new Set<string>();
 let openAiTaskFinishedAt: string | null = null;
 let networkModeSwitching = false;
 let runtimeActionInFlight = false;
+let runtimeMutationRevision = 0;
+let runtimeReadSequence = 0;
 let settingsSaving = false;
 let appUpdateChecking = false;
 let appUpdateError: string | null = null;
@@ -162,7 +165,7 @@ app.innerHTML = `
             <button class="button button-quiet" id="global-refresh">刷新</button>
           </div>
           <div class="header-runtime" aria-live="polite"><span class="application-status-dot" id="application-status-dot"></span><strong id="application-runtime-state">正在读取</strong></div>
-          <button class="button button-primary" id="global-start" disabled>启动</button>
+          <button class="button button-primary" id="global-start" title="启动核心并开启系统代理；TUN 请使用 TUN 模式按钮" aria-label="启动并开启系统代理" disabled>启动</button>
           <button class="button button-danger" id="global-stop" disabled>停止</button>
         </div>
       </header>
@@ -625,6 +628,8 @@ function phaseLabel(phase: string | undefined): string {
 
 async function refreshBase() {
   const requestedThemeRevision = themeController.mutationRevision;
+  const requestedRuntimeRevision = runtimeMutationRevision;
+  const requestedDuringRuntimeWrite = runtimeActionInFlight || networkModeSwitching || settingsSaving;
   const result = await action("", async () => {
     const [
       appInfo,
@@ -652,6 +657,9 @@ async function refreshBase() {
         api.openAiPolicyTask(),
         api.globalTraffic(),
       ]);
+    // A read started before/during a runtime or settings write must not put
+    // the old network mode and runtime status back into the toolbar.
+    if (requestedDuringRuntimeWrite || requestedRuntimeRevision !== runtimeMutationRevision || runtimeActionInFlight || networkModeSwitching || settingsSaving) return;
     if (!themeController.sync(settings.theme, requestedThemeRevision)) {
       settings.theme = themeController.snapshot.preference;
     }
@@ -684,6 +692,7 @@ function renderHeader() {
   const running = store.runtime?.phase === "running";
   const mode = store.settings?.networkMode;
   const controlsBusy = networkModeSwitching || runtimeActionInFlight;
+  ($("#global-refresh") as HTMLButtonElement).disabled = controlsBusy;
   const systemProxyActive = Boolean(
     running && mode === "system_proxy" && store.systemProxy?.active,
   );
@@ -716,7 +725,7 @@ function renderHeader() {
   tunButton.setAttribute("aria-pressed", String(tunActive));
   tunButton.title = store.tunHelper?.message ?? "TUN 使用最小权限 Helper 接管系统流量";
   tunButton.disabled = controlsBusy || !store.settings || !store.activeProfile;
-  ($("#global-start") as HTMLButtonElement).disabled = !store.runtime || !store.activeProfile || running || controlsBusy;
+  ($("#global-start") as HTMLButtonElement).disabled = !canStartRuntime(store.runtime) || !store.settings || !store.activeProfile || controlsBusy;
   ($("#global-stop") as HTMLButtonElement).disabled = !running || controlsBusy;
   $("#about-app")!.textContent = store.appInfo?.version ?? "—";
   $("#about-core")!.textContent = store.binary?.version ?? "未找到";
@@ -749,8 +758,8 @@ function renderOverview() {
   const tunSwitch = $("#home-tun") as HTMLInputElement;
   systemProxySwitch.checked = store.settings?.networkMode === "system_proxy";
   tunSwitch.checked = store.settings?.networkMode === "tun";
-  systemProxySwitch.disabled = networkModeSwitching || !store.settings || !store.activeProfile;
-  tunSwitch.disabled = networkModeSwitching || !store.settings || !store.activeProfile;
+  systemProxySwitch.disabled = networkModeSwitching || runtimeActionInFlight || !store.settings || !store.activeProfile;
+  tunSwitch.disabled = networkModeSwitching || runtimeActionInFlight || !store.settings || !store.activeProfile;
   const routingMode = store.activeProfile?.profile.routingMode ?? "rule";
   $$("#home-routing-mode button").forEach((button) => {
     button.classList.toggle("is-active", button.dataset.routingMode === routingMode);
@@ -1135,7 +1144,7 @@ function renderAppearance(snapshot: ThemeSnapshot) {
   });
   $(".appearance-grid")!.setAttribute("aria-busy", String(snapshot.saving));
   const submit = document.querySelector<HTMLButtonElement>('#settings-form button[type="submit"]');
-  if (submit) submit.disabled = busy;
+  if (submit) submit.disabled = busy || runtimeActionInFlight || networkModeSwitching;
   $("#appearance-status")!.textContent = snapshot.saving
     ? "正在保存外观…"
     : appearanceFeedback || (snapshot.selected === "system"
@@ -1184,8 +1193,14 @@ document.querySelectorAll<HTMLButtonElement>("[data-theme-choice]").forEach((but
 });
 themeController.refresh();
 
-async function refreshRuntimeOnly() {
+async function refreshRuntimeOnly(allowDuringRuntimeAction = false) {
+  const requestedDuringWrite = runtimeActionInFlight || networkModeSwitching || settingsSaving;
+  if (requestedDuringWrite && !allowDuringRuntimeAction) return;
+  const requestedRevision = runtimeMutationRevision;
+  const requestedSequence = ++runtimeReadSequence;
   const [runtime, systemProxy, tunHelper] = await Promise.all([api.runtime(), api.systemProxy(), api.tunHelperStatus()]);
+  if (requestedRevision !== runtimeMutationRevision || requestedSequence !== runtimeReadSequence
+    || (!allowDuringRuntimeAction && (runtimeActionInFlight || networkModeSwitching || settingsSaving))) return;
   store.runtime = runtime;
   store.systemProxy = systemProxy;
   store.tunHelper = tunHelper;
@@ -1196,34 +1211,47 @@ async function refreshRuntimeOnly() {
   renderSubscriptions();
 }
 
-async function startRuntime() {
-  if (!store.activeProfile) {
+async function startRuntime(mode: RuntimeStartMode) {
+  const result = await startRuntimeInMode(mode, {
+    state: () => ({ settings: store.settings, runtime: store.runtime, systemProxyActive: Boolean(store.systemProxy?.active), hasProfile: Boolean(store.activeProfile), busy: runtimeActionInFlight || networkModeSwitching || settingsSaving }),
+    setBusy: (busy) => { runtimeMutationRevision++; runtimeActionInFlight = busy; renderHeader(); renderOverview(); renderAppearance(themeController.snapshot); },
+    setSettings: (settings) => { store.settings = settings; },
+    setRuntime: (runtime) => { store.runtime = runtime; },
+    readRuntime: api.runtime,
+    readSettings: api.settings,
+    setNetworkMode: api.setNetworkMode,
+    startActive: api.startActive,
+    ensureTunReady: ensureTunHelperReady,
+    refresh: async () => { store.settings = await api.settings(); await refreshRuntimeOnly(true); renderSettings(); },
+  });
+  if (result.kind === "needs-profile") {
     toast("请先创建并激活一个配置档案", "error");
     navigate("profiles");
-    return;
-  }
-  if (runtimeActionInFlight || networkModeSwitching) return;
-  runtimeActionInFlight = true;
-  renderHeader();
-  try {
-    if (store.settings?.networkMode === "tun" && !(await ensureTunHelperReady())) return;
-    const result = await action("Mihomo 已启动", () => api.startActive());
-    if (result) store.runtime = result;
-  } finally {
-    runtimeActionInFlight = false;
-    await refreshRuntimeOnly();
+  } else if (result.kind === "failed") {
+    let message = errorMessage(result.error);
+    if (result.restored) message += "；已恢复之前的网络模式，未重新启动代理";
+    if (result.rollbackError) message += `；回滚失败：${errorMessage(result.rollbackError)}`;
+    toast(message, "error");
+  } else if (result.refreshError) {
+    toast(`运行状态刷新失败，请点击刷新核对：${errorMessage(result.refreshError)}`, "error");
+  } else if (result.kind === "started") {
+    toast(mode === "system_proxy" ? "Mihomo 已启动，系统代理已开启" : "Mihomo 已启动，TUN 模式已开启", "success");
   }
 }
 
 async function stopRuntime() {
   if (runtimeActionInFlight || networkModeSwitching) return;
   runtimeActionInFlight = true;
+  runtimeMutationRevision++;
   renderHeader();
+  renderAppearance(themeController.snapshot);
   try {
     const result = await action("Mihomo 已停止", () => api.stop());
     if (result) store.runtime = result;
   } finally {
     runtimeActionInFlight = false;
+    runtimeMutationRevision++;
+    renderAppearance(themeController.snapshot);
     await refreshRuntimeOnly();
   }
 }
@@ -1237,11 +1265,11 @@ function toggleGlobalNetworkMode(mode: "system_proxy" | "tun") {
   if (active) {
     void switchNetworkMode("manual");
   } else if (store.settings.networkMode === mode && !running) {
-    void startRuntime();
+    void startRuntime(mode);
   } else if (store.settings.networkMode === mode) {
     void (async () => {
       await stopRuntime();
-      await startRuntime();
+      await startRuntime(mode);
     })();
   } else {
     void switchNetworkMode(mode);
@@ -1250,7 +1278,7 @@ function toggleGlobalNetworkMode(mode: "system_proxy" | "tun") {
 
 async function switchNetworkMode(mode: NetworkMode) {
   if (!store.settings) return;
-  if (networkModeSwitching || runtimeActionInFlight) return;
+  if (networkModeSwitching || runtimeActionInFlight || settingsSaving) return;
   const wasRunning = store.runtime?.phase === "running";
   const currentMode = store.settings.networkMode;
   if (mode === currentMode) return;
@@ -1258,6 +1286,8 @@ async function switchNetworkMode(mode: NetworkMode) {
   const tunSwitch = $("#home-tun") as HTMLInputElement;
   let modeChanged = false;
   networkModeSwitching = true;
+  runtimeMutationRevision++;
+  renderAppearance(themeController.snapshot);
   systemSwitch.disabled = true;
   tunSwitch.disabled = true;
   renderHeader();
@@ -1293,6 +1323,8 @@ async function switchNetworkMode(mode: NetworkMode) {
     toast(message, "error");
   } finally {
     networkModeSwitching = false;
+    runtimeMutationRevision++;
+    renderAppearance(themeController.snapshot);
     await refreshBase();
   }
 }
@@ -2058,7 +2090,7 @@ $$<HTMLButtonElement>(".nav-item").forEach((button) =>
   button.addEventListener("click", () => navigate(button.dataset.view as ViewName)),
 );
 $("#global-refresh")!.addEventListener("click", () => void refreshBase());
-$("#global-start")!.addEventListener("click", () => void startRuntime());
+$("#global-start")!.addEventListener("click", () => void startRuntime("system_proxy"));
 $("#global-stop")!.addEventListener("click", () => void stopRuntime());
 $("#global-system-proxy")!.addEventListener("click", () =>
   toggleGlobalNetworkMode("system_proxy"),
@@ -2395,7 +2427,7 @@ document.querySelectorAll<HTMLInputElement>('[name="settings-network-mode"]').fo
 });
 $("#settings-form")!.addEventListener("submit", async (event) => {
   event.preventDefault();
-  if (!store.settings || settingsSaving || themeController.snapshot.saving) return;
+  if (!store.settings || settingsSaving || runtimeActionInFlight || networkModeSwitching || themeController.snapshot.saving) return;
   const mode = ($("#settings-mode") as HTMLSelectElement).value as NetworkMode;
   const settings: AppSettings = {
     ...store.settings,
@@ -2410,6 +2442,7 @@ $("#settings-form")!.addEventListener("submit", async (event) => {
     ),
   };
   settingsSaving = true;
+  runtimeMutationRevision++;
   themeController.refresh();
   try {
     if (mode === "tun" && mode !== store.settings.networkMode) {
@@ -2429,6 +2462,7 @@ $("#settings-form")!.addEventListener("submit", async (event) => {
     }
   } finally {
     settingsSaving = false;
+    runtimeMutationRevision++;
     themeController.refresh();
   }
 });

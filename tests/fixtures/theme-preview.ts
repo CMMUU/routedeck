@@ -10,7 +10,7 @@ import type {
   AppSettings, AppUpdateStatus, UpdateSource, ProfileDetails, ProfileRecord,
   UserRule, UserRulesState, UserRulesValidation,
   ProgramInput, ProgramState, RouteSettings, RouteSnapshot,
-  SubscriptionMetadata, SubscriptionOverview, SubscriptionStatus,
+  SubscriptionMetadata, SubscriptionOverview, SubscriptionStatus, NetworkMode,
 } from "../../src/types";
 import type { ThemePreference } from "../../src/theme";
 
@@ -65,6 +65,53 @@ let cancelUpdateDownload = false;
 let updateInstallCount = 0;
 let appearanceSettings = { launchAtLogin: false, showGlobalTraffic: true, diagnosticsRetentionDays: 7 };
 let settingsSaveCount = 0;
+
+// Explicitly opt in to a wholly in-memory toolbar-start scenario. The default
+// visual fixture still rejects core/network mutations; no IPC is forwarded.
+let runtimeScenarioEnabled = false;
+let fixtureRuntimeMode: NetworkMode = "manual";
+let fixtureRuntimePhase = "running";
+let fixtureSystemProxyActive = false;
+let fixtureRuntimeFailSave = false, fixtureRuntimeFailStart = false, fixtureRuntimeFailRollback = false;
+let fixtureRuntimeDelay = 120;
+let fixtureRuntimeHelperReady = true;
+let fixtureRuntimeProxyConfirmed = true, fixtureRuntimeCrashAfterStart = false;
+const fixtureRuntimeCalls: { command: string; mode?: NetworkMode }[] = [];
+function reportRuntimeScenario() {
+  document.documentElement.dataset.fixtureRuntimeState = JSON.stringify({ enabled: runtimeScenarioEnabled, networkMode: fixtureRuntimeMode, phase: fixtureRuntimePhase, systemProxyActive: fixtureSystemProxyActive });
+  document.documentElement.dataset.fixtureRuntimeCalls = JSON.stringify(fixtureRuntimeCalls);
+}
+function setRuntimeScenario(detail: Record<string, unknown>) {
+  runtimeScenarioEnabled = true;
+  if (typeof detail.scenario === "string") {
+    fixtureRuntimeMode = detail.scenario === "tun" ? "tun" : detail.scenario === "system_proxy" ? "system_proxy" : "manual";
+    fixtureRuntimePhase = detail.scenario === "running" ? "running" : "stopped";
+    fixtureSystemProxyActive = false;
+    fixtureRuntimeFailSave = detail.scenario === "save-failed";
+    fixtureRuntimeFailStart = detail.scenario === "start-failed";
+    fixtureRuntimeFailRollback = false;
+    fixtureRuntimeHelperReady = true;
+    fixtureRuntimeProxyConfirmed = detail.scenario !== "proxy-unconfirmed";
+    fixtureRuntimeCrashAfterStart = detail.scenario === "crashed-after-start";
+    fixtureRuntimeCalls.length = 0;
+  }
+  if (typeof detail.failSave === "boolean") fixtureRuntimeFailSave = detail.failSave;
+  if (typeof detail.failStart === "boolean") fixtureRuntimeFailStart = detail.failStart;
+  if (typeof detail.failRollback === "boolean") fixtureRuntimeFailRollback = detail.failRollback;
+  if (typeof detail.helperReady === "boolean") fixtureRuntimeHelperReady = detail.helperReady;
+  if (typeof detail.proxyActive === "boolean") fixtureRuntimeProxyConfirmed = detail.proxyActive;
+  if (typeof detail.crashAfterStart === "boolean") fixtureRuntimeCrashAfterStart = detail.crashAfterStart;
+  if (typeof detail.delayMs === "number" && Number.isInteger(detail.delayMs) && detail.delayMs >= 0 && detail.delayMs <= 3000) fixtureRuntimeDelay = detail.delayMs;
+  reportRuntimeScenario();
+}
+window.addEventListener("routedeck-fixture-runtime", event => {
+  const detail = (event as CustomEvent<Record<string, unknown>>).detail;
+  if (!detail || typeof detail !== "object") return;
+  setRuntimeScenario(detail);
+  if (detail.refresh === true) document.querySelector<HTMLButtonElement>("#global-refresh")?.click();
+});
+if (previewQuery.has("runtimeScenario")) setRuntimeScenario({ scenario: previewQuery.get("runtimeScenario") });
+reportRuntimeScenario();
 
 // In-memory scenarios only: no persisted Codex config, native IPC or sockets.
 // Dispatch `routedeck-fixture-routing` with { scenario, ...options } and refresh
@@ -558,7 +605,7 @@ function settings(): AppSettings {
     schemaVersion: 1,
     locale: "zh-CN",
     theme: persisted.theme,
-    networkMode: "manual",
+    networkMode: fixtureRuntimeMode,
     mixedPort: 17890,
     controllerPort: 19090,
     updateChannel: "stable",
@@ -576,12 +623,12 @@ const readonlyReplies: Record<string, () => unknown> = {
   check_system_proxy_compatibility: () => ({ supported: true, systemConfigured: true, compatible: true, expectedProxy: programs.proxyEndpoint, resolvedHttp: programs.proxyEndpoint, resolvedHttps: programs.proxyEndpoint, detail: "合成检查：HTTP/HTTPS 解析已指向本地代理；未读取真实注册表，也未验证真实长连接。" }),
   probe_mihomo: () => ({ available: true, path: "/fixture-only/mihomo", version: "v0.0.0-fixture", message: "纯合成状态，真实内核未启动" }),
   runtime_status: () => ({
-    state: "running", phase: "running", binaryAvailable: true,
+    state: fixtureRuntimePhase, phase: fixtureRuntimePhase, binaryAvailable: true,
     binaryPath: "/fixture-only/mihomo", version: "v0.0.0-fixture", configPath: "/fixture-only/config.yaml",
     message: "合成运行态仅用于展示界面；未启动真实内核。", pid: null, startedAt: stamp, lastError: null,
   }),
-  system_proxy_status: () => ({ active: false, snapshotPath: null, platform: "macos" }),
-  tun_helper_status: () => ({ supported: true, state: "not_installed", message: "合成预览不安装或调用 Helper", protocolVersion: 1, runtimeRunning: false, runtimePid: null, runtimeVersion: null, lastError: null }),
+  system_proxy_status: () => ({ active: fixtureSystemProxyActive, snapshotPath: null, platform: previewWindows ? "windows" : "macos" }),
+  tun_helper_status: () => ({ supported: true, state: runtimeScenarioEnabled ? fixtureRuntimeHelperReady ? "ready" : "requires_approval" : "not_installed", message: "合成预览不安装或调用 Helper", protocolVersion: 1, runtimeRunning: false, runtimePid: null, runtimeVersion: null, lastError: null }),
   global_traffic_snapshot: () => ({ enabled: true, uploadBytesPerSecond: 32000, downloadBytesPerSecond: 2400000, sampledAt: stamp, interfaces: ["fixture-only"] }),
   list_profiles: () => structuredClone(profiles),
   list_subscriptions: () => { subscriptionCalls.reads++; reportSubscriptions(); return subscriptions(); },
@@ -621,6 +668,50 @@ function payloadRecord(payload: InvokeArgs | undefined): Record<string, unknown>
 
 mockIPC(async (command, payload) => {
   const args = payloadRecord(payload);
+  if (runtimeScenarioEnabled && ["set_network_mode", "start_active_profile", "stop_mihomo", "prepare_tun_active_profile"].includes(command)) {
+    const requestedMode = args.mode as NetworkMode;
+    fixtureRuntimeCalls.push({ command, ...(command === "set_network_mode" ? { mode: requestedMode } : command === "start_active_profile" ? { mode: fixtureRuntimeMode } : {}) });
+    reportRuntimeScenario();
+    await new Promise(resolve => window.setTimeout(resolve, fixtureRuntimeDelay));
+    if (command === "set_network_mode") {
+      if (!["manual", "system_proxy", "tun"].includes(requestedMode)) throw routeError("INVALID_INPUT", "合成网络模式无效。");
+      if (fixtureRuntimePhase === "running") throw routeError("STATE_CONFLICT", "合成核心已运行，不允许切换模式。");
+      if (fixtureRuntimeFailSave || (fixtureRuntimeFailRollback && fixtureRuntimeCalls.some(call => call.command === "start_active_profile"))) {
+        fixtureRuntimeFailSave = false;
+        throw routeError("IO_ERROR", "模拟网络模式保存失败；原设置保持不变。");
+      }
+      fixtureRuntimeMode = requestedMode;
+      if (requestedMode !== "system_proxy") fixtureSystemProxyActive = false;
+      reportRuntimeScenario();
+      return settings();
+    }
+    if (command === "prepare_tun_active_profile") {
+      if (!fixtureRuntimeHelperReady) throw routeError("STATE_CONFLICT", "合成 TUN 尚未批准。");
+      return;
+    }
+    if (command === "start_active_profile") {
+      if (fixtureRuntimePhase === "running") throw routeError("STATE_CONFLICT", "合成核心已在运行，不允许重复启动。");
+      if (fixtureRuntimeFailStart) {
+        fixtureRuntimeFailStart = false;
+        fixtureRuntimePhase = "crashed";
+        reportRuntimeScenario();
+        throw routeError("RUNTIME_ERROR", "模拟核心启动失败；没有启动真实进程。");
+      }
+      fixtureRuntimePhase = "running";
+      fixtureSystemProxyActive = fixtureRuntimeMode === "system_proxy" && fixtureRuntimeProxyConfirmed;
+    } else {
+      fixtureRuntimePhase = "stopped";
+      fixtureSystemProxyActive = false;
+    }
+    reportRuntimeScenario();
+    const result = readonlyReplies.runtime_status();
+    if (command === "start_active_profile" && fixtureRuntimeCrashAfterStart) {
+      fixtureRuntimePhase = "crashed";
+      fixtureSystemProxyActive = false;
+      reportRuntimeScenario();
+    }
+    return result;
+  }
   if (["refresh_profile", "activate_profile", "delete_profile"].includes(command)) {
     const action = command === "refresh_profile" ? "refresh" : command === "activate_profile" ? "activate" : "delete";
     subscriptionCalls[action]++;

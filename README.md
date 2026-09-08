@@ -20,7 +20,7 @@ Serylane 是基于 **Mihomo** 内核、使用 Rust + Tauri 2 构建的开源桌�
 - 官网：[Serylane](https://serylane.cmmuu.com)（本轮部署中，访问状态以上线验收为准）。
 - 源码仓库：[GitHub](https://github.com/CMMUU/routedeck) · [Gitee](https://gitee.com/cmmuu/routedeck)
 - 版本发布：[GitHub Releases](https://github.com/CMMUU/routedeck/releases) · [Gitee Releases](https://gitee.com/cmmuu/routedeck/releases)
-- 当前源码版本为 **0.7.4**，采用 Serylane 展示品牌，保留磨砂玻璃界面、订阅流量卡片和可选本地路由；见 [v0.7.4 发布说明](docs/发布说明-v0.7.4.md)。源码版本不表示对应安装包已公开发布，正式可用版本以两渠道实际 Release 与更新清单为准。
+- 当前源码版本为 **0.7.5**，主「启动」默认启动 Mihomo 核心并启用系统代理，明确的 TUN 操作仍走 TUN 流程，保留 Serylane 品牌和 S 图标；见 [v0.7.5 发布说明](docs/发布说明-v0.7.5.md)。源码版本不表示对应安装包已公开发布，正式可用版本以两渠道实际 Release 与更新清单为准。
 - 安装包、SHA-256 校验文件和更新签名以 Release 页面实际附件为准；应用内自动更新同版本优先 Gitee，GitHub 备用。历史版本附件文件名保持不变。
 - Windows 10/11 TUN 为实验性功能，已实现管理员会话运行方式，尚未完成真实 TUN 路由与恢复验收。各平台的安装、构建和网络接管验证范围见 [v0.5.0 发布说明](docs/发布说明-v0.5.0.md)。
 - 自 2026-09-04 起，应用源码按 [GNU GPL v3（GPL-3.0-only）](LICENSE) 开源。第三方依赖沿用各自许可证，见 [第三方声明](THIRD_PARTY_NOTICES.md)、[v0.5.0 许可证清单](docs/compliance/v0.5.0/license-inventory.md) 和 [SBOM](docs/compliance/v0.5.0/sbom.cdx.json)。`package.json` 中的 `private: true` 仅防止意外发布到 npm，不限制源码访问或 GPL 授予的权利。
@@ -29,11 +29,12 @@ Serylane 是基于 **Mihomo** 内核、使用 Rust + Tauri 2 构建的开源桌�
 
 1. 从上面的 Release 页面选择与系统和处理器架构匹配的安装包；渠道未提供对应附件时使用另一渠道，以实际发布内容为准。
 2. 在「订阅」添加自己的 Clash Meta / Mihomo YAML 订阅，或导入本地配置；本项目不提供代理节点或订阅服务。
-3. 选用配置，按需选择网络模式并启动；使用系统代理前先关闭其他客户端的系统代理／TUN，避免相互接管。
+3. 选用配置，点击顶部主「启动」会启动 Mihomo 核心并启用系统代理；需要 TUN 时使用明确的「TUN 模式」入口，仍按 TUN 流程处理权限和预检。程序代理中的程序启动与独立路由服务操作仍不自动修改系统代理／TUN；它们不是 Mihomo 核心的启动入口。启用系统代理或 TUN 前先关闭其他客户端的系统代理／TUN，避免相互接管。
 4. Codex 本地路由不是普通代理使用的必要步骤，默认保持关闭。需要时先阅读下方「Codex 路由与稳定灾备」中的接入范围、备份与恢复说明。
 
 ## 设计文档
 
+- [v0.7.5 发布说明（主启动默认系统代理）](docs/发布说明-v0.7.5.md)
 - [v0.7.4 发布说明（Serylane 品牌与升级兼容）](docs/发布说明-v0.7.4.md)
 - [v0.7.3 发布说明（玻璃界面、订阅流量与可选路由）](docs/发布说明-v0.7.3.md)
 - [软件设计说明书（SDD）](docs/软件设计说明书.md)

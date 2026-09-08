@@ -1,6 +1,15 @@
 # Changelog
 
-## 0.7.4 - Unreleased
+## 0.7.5 - Unreleased
+
+- Make the global Start action start the Mihomo core with system proxy enabled, instead of inheriting a previous core-only mode.
+- Restore the previous network preference after a failed start without restarting another session. Make failed port validation and process creation retryable, retain concurrent-start guards, and verify observed runtime/proxy state before showing success.
+- Prevent settings writes and stale asynchronous status reads from racing the start action.
+- Keep the explicit TUN action on the TUN path, with its existing permission and preflight requirements. Program launches and independent local-router operations still do not automatically change system proxy or TUN settings; they are not Mihomo core-start buttons. The local router remains off by default, with separate save, enable and Codex attachment actions.
+- Preserve the Serylane display brand and S icon, RouteDeck installer/update identities, existing data, signing key and release history. The default changes when the user invokes global Start; no background mode migration is added.
+- Keep real network, TUN and long-session acceptance separate from automated tests; no uninterrupted-connectivity guarantee is made.
+
+## 0.7.4 - 2026-09-08
 
 - Adopt Serylane as the desktop display brand, including the window, tray, interface and safety prompts. Keep the Chinese functional subtitle and the RouteDeck name in explicit installer-compatibility explanations.
 - Use the new transparent blue S mark for desktop and sidebar icons, generated from the approved image with the official Tauri icon CLI; retain the previous source artwork for provenance.

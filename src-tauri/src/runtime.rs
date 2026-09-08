@@ -82,10 +82,50 @@ pub struct MihomoRuntime {
 
 impl MihomoRuntime {
     pub fn start(&self, app: &AppHandle, source: &str) -> AppResult<RuntimeStatus> {
+        self.start_attempt(|| self.start_process(app, source))
+    }
+
+    fn start_attempt<T>(&self, operation: impl FnOnce() -> AppResult<T>) -> AppResult<T> {
         if self.is_running()? {
             return Err(AppError::Conflict("Mihomo 已经在运行".to_string()));
         }
-        self.set_phase(RuntimePhase::Validating);
+        {
+            let mut phase = lock(&self.phase, "phase")?;
+            if matches!(
+                *phase,
+                RuntimePhase::Validating
+                    | RuntimePhase::Starting
+                    | RuntimePhase::Running
+                    | RuntimePhase::Stopping
+                    | RuntimePhase::Recovering
+            ) {
+                return Err(AppError::Conflict(
+                    "Mihomo 正在处理运行状态，请稍后重试".to_string(),
+                ));
+            }
+            *phase = RuntimePhase::Validating;
+        }
+        let result = operation();
+        if let Err(error) = &result {
+            // Only this failed attempt with no owned process/lease can become
+            // retryable. Never stop a live session or relax in-flight guards.
+            if let (Ok(child), Ok(lease)) = (self.child.lock(), self.tun_lease.lock()) {
+                if child.is_none() && lease.is_none() {
+                    if let Ok(mut phase) = self.phase.lock() {
+                        if matches!(*phase, RuntimePhase::Validating | RuntimePhase::Starting) {
+                            if let Ok(mut last_error) = self.last_error.lock() {
+                                *last_error = Some(redact(&error.to_string()));
+                            }
+                            *phase = RuntimePhase::Crashed;
+                        }
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    fn start_process(&self, app: &AppHandle, source: &str) -> AppResult<RuntimeStatus> {
         let binary = resolve_binary(Some(app))
             .ok_or_else(|| AppError::Runtime("未找到 Mihomo sidecar".to_string()))?;
         preflight_ports(source)?;
@@ -140,48 +180,49 @@ impl MihomoRuntime {
         }
         #[cfg(not(windows))]
         {
-            if self.is_running()? {
-                return Err(AppError::Conflict("Mihomo 已经在运行".to_string()));
-            }
-            let helper = tun_service::status();
-            if !helper.ready() {
-                return Err(AppError::Platform(helper.message));
-            }
-            self.set_phase(RuntimePhase::Validating);
-            preflight_ports(source)?;
-            validate_source(app, source)?;
-            self.set_phase(RuntimePhase::Starting);
-
-            let mut lease_bytes = [0_u8; 32];
-            rand::rng().fill_bytes(&mut lease_bytes);
-            let lease = lease_bytes
-                .iter()
-                .map(|byte| format!("{byte:02x}"))
-                .collect::<String>();
-            let started_at = Utc::now();
-            let started = tun_service::start(source, &lease)?;
-            let config_path = PathBuf::from(&started.config_path);
-            let binary_path = config_path.parent().map(|parent| parent.join("mihomo"));
-
-            *lock(&self.tun_lease, "tun lease")? = Some(lease.clone());
-            *lock(&self.tun_pid, "tun pid")? = Some(started.pid);
-            *lock(&self.binary_path, "binary path")? = binary_path;
-            *lock(&self.binary_version, "binary version")? = started.version;
-            *lock(&self.config_path, "config path")? = Some(config_path);
-            *lock(&self.started_at, "started at")? = Some(started_at);
-            *lock(&self.last_error, "last error")? = None;
-            if let Ok(mut error) = self.tun_heartbeat_error.lock() {
-                *error = None;
-            }
-            self.start_tun_heartbeat(lease);
-            self.set_phase(RuntimePhase::Running);
-            self.push_log(
-                "info",
-                "runtime",
-                format!("Privileged TUN Mihomo started with pid {}", started.pid),
-            );
-            Ok(self.status(Some(app)))
+            self.start_attempt(|| self.start_privileged_tun(app, source))
         }
+    }
+
+    #[cfg(not(windows))]
+    fn start_privileged_tun(&self, app: &AppHandle, source: &str) -> AppResult<RuntimeStatus> {
+        let helper = tun_service::status();
+        if !helper.ready() {
+            return Err(AppError::Platform(helper.message));
+        }
+        preflight_ports(source)?;
+        validate_source(app, source)?;
+        self.set_phase(RuntimePhase::Starting);
+
+        let mut lease_bytes = [0_u8; 32];
+        rand::rng().fill_bytes(&mut lease_bytes);
+        let lease = lease_bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let started_at = Utc::now();
+        let started = tun_service::start(source, &lease)?;
+        let config_path = PathBuf::from(&started.config_path);
+        let binary_path = config_path.parent().map(|parent| parent.join("mihomo"));
+
+        *lock(&self.tun_lease, "tun lease")? = Some(lease.clone());
+        *lock(&self.tun_pid, "tun pid")? = Some(started.pid);
+        *lock(&self.binary_path, "binary path")? = binary_path;
+        *lock(&self.binary_version, "binary version")? = started.version;
+        *lock(&self.config_path, "config path")? = Some(config_path);
+        *lock(&self.started_at, "started at")? = Some(started_at);
+        *lock(&self.last_error, "last error")? = None;
+        if let Ok(mut error) = self.tun_heartbeat_error.lock() {
+            *error = None;
+        }
+        self.start_tun_heartbeat(lease);
+        self.set_phase(RuntimePhase::Running);
+        self.push_log(
+            "info",
+            "runtime",
+            format!("Privileged TUN Mihomo started with pid {}", started.pid),
+        );
+        Ok(self.status(Some(app)))
     }
 
     pub fn stop(&self, app: Option<&AppHandle>) -> AppResult<RuntimeStatus> {
@@ -812,7 +853,12 @@ fn lock<'a, T>(mutex: &'a Mutex<T>, label: &str) -> AppResult<std::sync::MutexGu
 
 #[cfg(test)]
 mod tests {
-    use super::{preflight_ports, redact, run_validation_command, validation_diagnostic};
+    use super::{
+        preflight_ports, redact, run_validation_command, spawn_core_command, validation_diagnostic,
+        MihomoRuntime,
+    };
+    use crate::error::{AppError, AppResult};
+    use crate::models::RuntimePhase;
     use std::process::Command;
     use std::time::{Duration, Instant};
 
@@ -832,6 +878,74 @@ mod tests {
         let source =
             format!("mixed-port: {port}\nexternal-controller: 127.0.0.1:19090\nproxies: []\n");
         assert!(preflight_ports(&source).is_err());
+    }
+
+    #[test]
+    fn failed_port_preflight_converges_to_crashed_and_can_retry() {
+        let runtime = MihomoRuntime::default();
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("listener");
+        let port = listener.local_addr().expect("address").port();
+        let source = format!("mixed-port: {port}\nproxies: []\n");
+        runtime
+            .start_attempt(|| preflight_ports(&source))
+            .expect_err("occupied port");
+        assert_eq!(*runtime.phase.lock().unwrap(), RuntimePhase::Crashed);
+        assert!(runtime.last_error.lock().unwrap().is_some());
+        drop(listener);
+        runtime
+            .start_attempt(|| {
+                preflight_ports(&source)?;
+                runtime.set_phase(RuntimePhase::Stopped);
+                Ok(())
+            })
+            .expect("failed attempt must be retryable");
+    }
+
+    #[test]
+    fn failed_process_spawn_converges_to_crashed_and_can_retry() {
+        let runtime = MihomoRuntime::default();
+        let missing = std::env::temp_dir()
+            .join(format!("routedeck-missing-core-{}", uuid::Uuid::new_v4()))
+            .join("mihomo.exe");
+        assert!(!missing.exists());
+        let result: AppResult<()> = runtime.start_attempt(|| {
+            runtime.set_phase(RuntimePhase::Starting);
+            spawn_core_command(&mut Command::new(&missing), None)
+                .map_err(|error| AppError::Runtime(error.to_string()))?;
+            Ok(())
+        });
+        assert!(result.is_err());
+        assert_eq!(*runtime.phase.lock().unwrap(), RuntimePhase::Crashed);
+        assert!(runtime.child.lock().unwrap().is_none());
+        assert!(runtime.last_error.lock().unwrap().is_some());
+        runtime
+            .start_attempt(|| {
+                runtime.set_phase(RuntimePhase::Stopped);
+                Ok(())
+            })
+            .expect("failed spawn must be retryable");
+    }
+
+    #[test]
+    fn start_attempt_keeps_inflight_and_existing_lease_guards() {
+        let runtime = MihomoRuntime::default();
+        let result: AppResult<()> = runtime.start_attempt(|| {
+            assert!(runtime.start_attempt(|| Ok(())).is_err());
+            assert_eq!(*runtime.phase.lock().unwrap(), RuntimePhase::Validating);
+            Err(AppError::Runtime(
+                "synthetic validation failure".to_string(),
+            ))
+        });
+        assert!(result.is_err());
+        assert_eq!(*runtime.phase.lock().unwrap(), RuntimePhase::Crashed);
+        *runtime.tun_lease.lock().unwrap() = Some("synthetic-owned-lease".to_string());
+        runtime.set_phase(RuntimePhase::Running);
+        assert!(runtime.start_attempt(|| Ok(())).is_err());
+        assert_eq!(*runtime.phase.lock().unwrap(), RuntimePhase::Running);
+        assert_eq!(
+            runtime.tun_lease.lock().unwrap().as_deref(),
+            Some("synthetic-owned-lease")
+        );
     }
 
     #[test]
