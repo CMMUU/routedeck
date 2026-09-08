@@ -2,7 +2,9 @@
 
 基于已确认的三段磨砂玻璃设计实现，原生 HTML / CSS / JavaScript，无框架、第三方字体、分析脚本或客户端构建依赖。Cloudflare Workers Static Assets 托管；只上传 `public/`，不上传桌面程序源码、用户配置或密钥。
 
-目标：`https://serylane.cmmuu.com/`。部署是否成功以实际 HTTPS 验收为准，源码中的域名与配置本身不代表已经上线。
+官网：<https://serylane.cmmuu.com/>。已于 **2026-09-08** 部署至 Cloudflare Workers Static Assets，首页与四篇文档 HTTPS 200、未知路径 404、`.html` 归一化 307、robots 和 sitemap 均已通过线上请求验收。首次边缘访问曾短暂超时，复核后上述页面均正常；本记录不代表持续可用性监控或搜索引擎已收录。
+
+首次上线版本 ID：`3fdb1fbf-ace8-43dc-8fec-5e9aa1c96c4b`。先上传未绑定域名的新 Worker，再核对域名变更预检只包含该 hostname 的一个新增项、无更新/移除/冲突，最后以三个覆盖开关均为 `false` 绑定域名。回读确认指向 `serylane-website`，未替换已有 DNS 或其他网站。域名绑定会新增 Cloudflare 管理的 DNS 与证书。
 
 ## 本地检查
 
@@ -33,24 +35,26 @@ pnpm deploy:check
 3. 确认不会覆盖其他站点后，运行 `pnpm deploy`。配置只包含该子域名，不修改根域名、其他网站、账户安全设置或通配符 DNS。
 4. 验收主页与四篇文档 HTTPS 200，未知路径 404、`.html` 别名归一化、robots、sitemap、canonical 和下载链接。成功后才更新仓库 About 的 Homepage、README 的部署状态。
 
+注意：已安装的 Wrangler 4.129.0 在非交互自定义域名部署中会启用覆盖选项。不要在未核对现有 DNS/绑定时直接后台运行带域名的 `pnpm deploy`。首次上线采用分步上传与显式禁止覆盖的绑定；后续发布同样先验证域名归属与目标 Worker，遇到冲突停止。Wrangler 的 changeset/records 为其内部接口，不能视作稳定的公开 API；升级 CLI 后须重新核查部署行为。
+
 CI 仅检查，不存储 Cloudflare 凭据，也不会自动登录或部署。不得在缺少授权时把 `deploy --dry-run` 当成上线成功。
 
 ## 下载快照与更新
 
-当前固定为 **2026-09-08 核验的 v0.7.5**。GitHub 已正式发布，六个主包均返回 HEAD 200，Content-Length 与 Release API 的资产大小一致。国内镜像仍在同步；截至 **2026-09-08 11:39（UTC+8）** 的精确链接检查，仅 Linux ARM64 AppImage 返回 HEAD 200 且大小与 GitHub 一致，其余五个所选主包返回 404，不能宣称国内镜像齐全。这是下载可用性与元数据核验，不代表在本次检查中下载大包执行了独立哈希校验。
+当前固定为 **2026-09-08 核验的 v0.7.5**。GitHub 已正式发布，六个主包均返回 HEAD 200，Content-Length 与 Release API 的资产大小一致。国内镜像仍在同步；截至 **2026-09-08 12:04（UTC+8）** 的精确链接检查，Windows ARM64 EXE、macOS Apple Silicon DMG 与 Linux ARM64 AppImage 返回 HEAD 200 且大小与 GitHub 一致，其余三个 x64 主包返回 404，不能宣称国内镜像齐全。这是下载可用性与元数据核验，不代表在本次检查中下载大包执行了独立哈希校验。
 
 | 主包文件名 | GitHub 大小（字节） | 本次 Gitee HEAD |
 | --- | ---: | --- |
 | `RouteDeck_0.7.5_x64-setup.exe` | 17,908,356 | 404，未就绪 |
-| `RouteDeck_0.7.5_arm64-setup.exe` | 15,140,650 | 404，未就绪 |
+| `RouteDeck_0.7.5_arm64-setup.exe` | 15,140,650 | 200，大小一致 |
 | `RouteDeck_0.7.5_x64.dmg` | 27,482,395 | 404，未就绪 |
-| `RouteDeck_0.7.5_aarch64.dmg` | 25,154,497 | 404，未就绪 |
+| `RouteDeck_0.7.5_aarch64.dmg` | 25,154,497 | 200，大小一致 |
 | `RouteDeck_0.7.5_amd64.AppImage` | 100,559,352 | 404，未就绪 |
 | `RouteDeck_0.7.5_aarch64.AppImage` | 97,098,248 | 200，大小一致 |
 
 有同版本、同架构、同格式的国内主包时，将国内直链置为主要操作；其余情况明确提示缺失，主要操作改为已核验 GitHub 包。不会静默换成另一个版本或格式。
 
-当前仅 Linux ARM64 AppImage 为国内主操作、GitHub 备用；其余选项主操作为 GitHub，并明确提示当前所选国内包暂缺、保留国内发布页入口。无 JavaScript 时保留已核验的 Windows x64 GitHub EXE 直链，禁用无法工作的系统与架构选择器。这里是人工核验快照，不会自动探测镜像后续上传进度；更新国内可用集合前仍须复核具体链接。离线测试另外在 VM 内模拟国内包全部缺失或仅部分可用，持续验证格式提示、GitHub 回退和主操作 DOM 顺序，不向生产代码增加测试接口。
+当前三个 ARM64 主包为国内主操作、GitHub 备用；其余选项主操作为 GitHub，并明确提示当前所选国内包暂缺、保留国内发布页入口。无 JavaScript 时保留已核验的 Windows x64 GitHub EXE 直链，禁用无法工作的系统与架构选择器。这里是人工核验快照，不会自动探测镜像后续上传进度；更新国内可用集合前仍须复核具体链接。离线测试另外在 VM 内模拟国内包全部缺失或仅部分可用，持续验证格式提示、GitHub 回退和主操作 DOM 顺序，不向生产代码增加测试接口。
 
 新版本发布后，必须先核对 GitHub Release、Gitee API、具体文件的 HEAD 状态及大小，再同步修改 `public/site.js` 的 release 快照、首页无 JavaScript 降级链接/版本文字和 `scripts/test-downloads.mjs` 的独立预期值。未发布的源码版本、标签或存在的签名文件，不是包已存在的证据。国内链接不齐时不谎报镜像成功。
 
@@ -64,6 +68,7 @@ CI 仅检查，不存储 Cloudflare 凭据，也不会自动登录或部署。�
 - 严格 CSP：不连接外部 API 或本地代理，不执行内联脚本或第三方脚本；网站没有登录、上传、支付或接管程序功能。
 - 正文即时重新验证缓存，PNG 标志缓存一天；不对未带内容哈希的文件设置 immutable。
 - 可被抓取不等于已被 Google 收录。上线后仍需域名所有者在 Search Console 验证站点并提交 sitemap；不得声称已提交或保证排名。
+- 线上 robots 会叠加当前 Cloudflare 托管内容信号：普通搜索允许抓取，部分 AI 爬虫被阻止，项目 sitemap 仍保留。本次未修改这些区域级安全/爬虫设置。
 
 ## 设计与素材
 

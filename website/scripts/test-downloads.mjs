@@ -13,9 +13,9 @@ const giteeBase = `https://gitee.com/cmmuu/routedeck/releases/download/${version
 const giteeRelease = `https://gitee.com/cmmuu/routedeck/releases/tag/${version}`;
 const downloads = [
   { system: 'windows', architecture: 'x64', short: 'Windows', name: 'Windows 10 / 11', icon: 'windows', format: 'EXE', filename: 'RouteDeck_0.7.5_x64-setup.exe', domestic: false },
-  { system: 'windows', architecture: 'arm64', short: 'Windows', name: 'Windows 10 / 11', icon: 'windows', format: 'EXE', filename: 'RouteDeck_0.7.5_arm64-setup.exe', domestic: false },
+  { system: 'windows', architecture: 'arm64', short: 'Windows', name: 'Windows 10 / 11', icon: 'windows', format: 'EXE', filename: 'RouteDeck_0.7.5_arm64-setup.exe', domestic: true },
   { system: 'macos', architecture: 'x64', short: 'macOS', name: 'macOS', icon: 'apple', format: 'DMG', filename: 'RouteDeck_0.7.5_x64.dmg', domestic: false },
-  { system: 'macos', architecture: 'arm64', short: 'macOS', name: 'macOS', icon: 'apple', format: 'DMG', filename: 'RouteDeck_0.7.5_aarch64.dmg', domestic: false },
+  { system: 'macos', architecture: 'arm64', short: 'macOS', name: 'macOS', icon: 'apple', format: 'DMG', filename: 'RouteDeck_0.7.5_aarch64.dmg', domestic: true },
   { system: 'linux', architecture: 'x64', short: 'Linux', name: 'Linux · AppImage', icon: 'linux', format: 'AppImage', filename: 'RouteDeck_0.7.5_amd64.AppImage', domestic: false },
   { system: 'linux', architecture: 'arm64', short: 'Linux', name: 'Linux · AppImage', icon: 'linux', format: 'AppImage', filename: 'RouteDeck_0.7.5_aarch64.AppImage', domestic: true },
 ];

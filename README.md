@@ -17,7 +17,7 @@ Serylane 是基于 **Mihomo** 内核、使用 Rust + Tauri 2 构建的开源桌�
 
 ## 源码与下载
 
-- 官网：[Serylane](https://serylane.cmmuu.com)（本轮部署中，访问状态以上线验收为准）。
+- 官网：[Serylane](https://serylane.cmmuu.com/)（已上线，提供安装包下载与使用文档）。
 - 源码仓库：[GitHub](https://github.com/CMMUU/routedeck) · [Gitee](https://gitee.com/cmmuu/routedeck)
 - 版本发布：[GitHub Releases](https://github.com/CMMUU/routedeck/releases) · [Gitee Releases](https://gitee.com/cmmuu/routedeck/releases)
 - 当前源码版本为 **0.7.5**，主「启动」默认启动 Mihomo 核心并启用系统代理，明确的 TUN 操作仍走 TUN 流程，保留 Serylane 品牌和 S 图标；见 [v0.7.5 发布说明](docs/发布说明-v0.7.5.md)。源码版本不表示对应安装包已公开发布，正式可用版本以两渠道实际 Release 与更新清单为准。
