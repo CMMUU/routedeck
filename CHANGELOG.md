@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.7.5 - Unreleased
+## 0.7.5 - 2026-09-08
 
 - Make the global Start action start the Mihomo core with system proxy enabled, instead of inheriting a previous core-only mode.
 - Restore the previous network preference after a failed start without restarting another session. Make failed port validation and process creation retryable, retain concurrent-start guards, and verify observed runtime/proxy state before showing success.

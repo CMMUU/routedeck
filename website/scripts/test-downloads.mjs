@@ -7,17 +7,17 @@ const script = await readFile(new URL('../public/site.js', import.meta.url), 'ut
 
 // Independent, publicly verified 2026-09-08 release snapshot. These tests are
 // offline: changing the release requires checking the remote assets again.
-const version = 'v0.7.4';
+const version = 'v0.7.5';
 const githubBase = `https://github.com/CMMUU/routedeck/releases/download/${version}/`;
 const giteeBase = `https://gitee.com/cmmuu/routedeck/releases/download/${version}/`;
 const giteeRelease = `https://gitee.com/cmmuu/routedeck/releases/tag/${version}`;
 const downloads = [
-  { system: 'windows', architecture: 'x64', short: 'Windows', name: 'Windows 10 / 11', icon: 'windows', format: 'EXE', filename: 'RouteDeck_0.7.4_x64-setup.exe', domestic: true },
-  { system: 'windows', architecture: 'arm64', short: 'Windows', name: 'Windows 10 / 11', icon: 'windows', format: 'EXE', filename: 'RouteDeck_0.7.4_arm64-setup.exe', domestic: true },
-  { system: 'macos', architecture: 'x64', short: 'macOS', name: 'macOS', icon: 'apple', format: 'DMG', filename: 'RouteDeck_0.7.4_x64.dmg', domestic: true },
-  { system: 'macos', architecture: 'arm64', short: 'macOS', name: 'macOS', icon: 'apple', format: 'DMG', filename: 'RouteDeck_0.7.4_aarch64.dmg', domestic: true },
-  { system: 'linux', architecture: 'x64', short: 'Linux', name: 'Linux · AppImage', icon: 'linux', format: 'AppImage', filename: 'RouteDeck_0.7.4_amd64.AppImage', domestic: true },
-  { system: 'linux', architecture: 'arm64', short: 'Linux', name: 'Linux · AppImage', icon: 'linux', format: 'AppImage', filename: 'RouteDeck_0.7.4_aarch64.AppImage', domestic: true },
+  { system: 'windows', architecture: 'x64', short: 'Windows', name: 'Windows 10 / 11', icon: 'windows', format: 'EXE', filename: 'RouteDeck_0.7.5_x64-setup.exe', domestic: false },
+  { system: 'windows', architecture: 'arm64', short: 'Windows', name: 'Windows 10 / 11', icon: 'windows', format: 'EXE', filename: 'RouteDeck_0.7.5_arm64-setup.exe', domestic: false },
+  { system: 'macos', architecture: 'x64', short: 'macOS', name: 'macOS', icon: 'apple', format: 'DMG', filename: 'RouteDeck_0.7.5_x64.dmg', domestic: false },
+  { system: 'macos', architecture: 'arm64', short: 'macOS', name: 'macOS', icon: 'apple', format: 'DMG', filename: 'RouteDeck_0.7.5_aarch64.dmg', domestic: false },
+  { system: 'linux', architecture: 'x64', short: 'Linux', name: 'Linux · AppImage', icon: 'linux', format: 'AppImage', filename: 'RouteDeck_0.7.5_amd64.AppImage', domestic: false },
+  { system: 'linux', architecture: 'arm64', short: 'Linux', name: 'Linux · AppImage', icon: 'linux', format: 'AppImage', filename: 'RouteDeck_0.7.5_aarch64.AppImage', domestic: true },
 ];
 
 // Read actual markup, rather than duplicating its attributes in a fake fixture.
@@ -159,7 +159,7 @@ let checks = 0;
 function check(name, run) { run(); checks++; console.log(`PASS: ${name}`); }
 const expectedSelection = (system, architecture) => downloads.find(item => item.system === system && item.architecture === architecture);
 
-check('No-JavaScript HTML offers domestic Windows x64 first, GitHub backup and disabled selectors', () => {
+check('No-JavaScript HTML offers verified GitHub Windows x64, a domestic release fallback and disabled selectors', () => {
   assert.deepEqual(systemTags.map(tag => tag.attributes['data-system']), ['windows', 'macos', 'linux']);
   assert.deepEqual(architectureTags.map(tag => tag.attributes['data-architecture']), ['x64', 'arm64']);
   for (const tag of [...systemTags, ...architectureTags]) {
@@ -174,13 +174,14 @@ check('No-JavaScript HTML offers domestic Windows x64 first, GitHub backup and d
   assert.equal(architectureTags[0].attributes['aria-pressed'], 'true');
   assert.equal(architectureTags[1].attributes['aria-pressed'], 'false');
   assert.equal(byId('download-github').attributes.href, githubBase + downloads[0].filename);
-  assert.equal(byId('download-gitee').attributes.href, giteeBase + downloads[0].filename);
-  assert.ok(hasClass(byId('download-gitee'), 'button-primary'));
-  assert.ok(hasClass(byId('download-github'), 'button-secondary'));
-  assert.deepEqual([...releaseLinks.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]), ['download-gitee', 'download-github']);
-  assert.equal(byId('download-gitee').attributes['aria-label'], `从 Gitee 下载 RouteDeck ${version} Windows x64 EXE 安装包`);
-  assert.match(contentById('download-gitee'), /<span>国内下载 · EXE<\/span>/);
-  assert.match(contentById('download-github'), /<span>GitHub 备用<\/span>/);
+  assert.equal(byId('download-gitee').attributes.href, giteeRelease);
+  assert.ok(hasClass(byId('download-github'), 'button-primary'));
+  assert.ok(hasClass(byId('download-gitee'), 'button-secondary'));
+  assert.deepEqual([...releaseLinks.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]), ['download-github', 'download-gitee']);
+  assert.equal(byId('download-github').attributes['aria-label'], `从 GitHub 下载 RouteDeck ${version} Windows x64 EXE 安装包`);
+  assert.equal(byId('download-gitee').attributes['aria-label'], `查看 Gitee ${version} 发布页；当前未提供 Windows x64 EXE 安装包`);
+  assert.match(contentById('download-gitee'), /<span>查看 Gitee 发布<\/span>/);
+  assert.match(contentById('download-github'), /<span>GitHub 下载 · EXE<\/span>/);
   assert.equal(contentById('platform-name'), 'Windows 10 / 11');
   assert.match(contentById('platform-icon'), /<use href="#i-windows"/);
   assert.equal(byId('download-panel').attributes['aria-labelledby'], 'tab-windows');
@@ -191,7 +192,7 @@ check('No-JavaScript HTML offers domestic Windows x64 first, GitHub backup and d
   assert.match(fallback, /Windows x64/);
   assert.match(fallback, /JavaScript/);
   assert.ok(fallback.includes(`href="https://github.com/CMMUU/routedeck/releases/tag/${version}"`));
-  assert.equal(contentById('channel-note'), '国内渠道已提供 Windows x64 EXE 安装包，GitHub 备用。');
+  assert.equal(contentById('channel-note'), '国内镜像暂缺 Windows x64 EXE 安装包，请使用 GitHub。');
 });
 
 check('Both route illustrations are off, unattached and non-interactive', () => {
