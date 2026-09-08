@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import vm from "node:vm";
 import ts from "typescript";
 
 const read = (name) => readFileSync(new URL(`../src/${name}`, import.meta.url), "utf8");
 const { subscriptionBytes, subscriptionDate, describeSubscriptionUsage, subscriptionCardMarkup } = await import(`data:text/javascript;base64,${Buffer.from(ts.transpileModule(read("subscription-cards.ts"), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText).toString("base64")}`);
+const { subscriptionImportMarkup, describeSubscriptionImport } = await import(`data:text/javascript;base64,${Buffer.from(ts.transpileModule(read("subscription-import.ts"), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext } }).outputText).toString("base64")}`);
 const now = Date.parse("2026-09-07T00:00:00Z");
 const GiB = 1024 ** 3;
 const sample = (changes = {}) => ({ uploadBytes: 2 * GiB, downloadBytes: 28 * GiB, totalBytes: 100 * GiB, expiresAt: Date.parse("2026-10-07T00:00:00Z") / 1000, ...changes });
@@ -82,4 +84,133 @@ test("compact cards use glass tokens, readable type and responsive columns witho
   assert.match(css, /repeat\(2, minmax\(0,1fr\)\)/); assert.match(css, /@container subscriptions/);
   assert.match(css, /prefers-reduced-transparency/); assert.match(css, /forced-colors/);
   assert.doesNotMatch(css, /font-size:\s*(?:[0-9]|1[012])px/);
+});
+
+test("one remote subscription form and one add entry; overview only navigates and local YAML stays", () => {
+  const main = read("main.ts");
+  assert.doesNotMatch(main, /quick-subscription|quick-url|id="subscription-form"|id="subscription-url"|新增远程订阅/);
+  assert.equal((subscriptionImportMarkup.match(/<form\b/g) ?? []).length, 1);
+  assert.equal((main.match(/id="subscriptions-add"/g) ?? []).length, 1);
+  assert.match(main, /#overview-go-subscriptions.*navigate\("subscriptions"\)/);
+  assert.match(main, /id="yaml-file"/); assert.match(main, /id="create-inline"/);
+  assert.match(subscriptionImportMarkup, /id="managed-subscription-panel" hidden/);
+  assert.match(subscriptionImportMarkup, /<details class="subscription-import-advanced"><summary>高级选项/);
+  assert.match(subscriptionImportMarkup, /id="managed-subscription-activate" type="checkbox" \/>/);
+  assert.match(read("api.ts"), /activateAfterImport = false/);
+  assert.match(read("subscription-cards.css"), /\.subscription-import-card\[hidden\][^{]+\{ display: none; \}/);
+});
+
+const importResult = (changes = {}) => ({ profile: { id: "new-fixture" }, updated: true, created: true, activated: false, openAiGeneration: "not_requested", openAiError: null, observationError: null, ...changes });
+test("import messages distinguish saving, explicit selection, duplicates and independent generation failures", () => {
+  assert.match(describeSubscriptionImport(importResult()).text, /未切换当前配置/);
+  assert.match(describeSubscriptionImport(importResult({ activated: true })).text, /添加并选用/);
+  assert.match(describeSubscriptionImport(importResult({ created: false })).text, /未重复添加，也未更改/);
+  assert.match(describeSubscriptionImport(importResult({ created: false, activated: true })).text, /未重新获取/);
+  assert.match(describeSubscriptionImport(importResult({ openAiGeneration: "started" })).text, /任务已提交/);
+  const failed = describeSubscriptionImport(importResult({ openAiGeneration: "failed", openAiError: "busy" }));
+  assert.equal(failed.warning, true); assert.match(failed.text, /订阅已添加.*未能开始：busy/);
+  assert.doesNotMatch(failed.text, /订阅添加失败|连接成功|正在筛选/);
+  for (const openAiGeneration of ["not_requested", "started", "failed"]) {
+    const observation = describeSubscriptionImport(importResult({ observationError: "检查记录未保存，请刷新列表后重试检查。", openAiGeneration }));
+    assert.equal(observation.warning, true);
+    assert.match(observation.text, /订阅已添加.*检查记录未保存/);
+    assert.doesNotMatch(observation.text, /订阅添加失败/);
+  }
+});
+
+function importControllerFixture(options = {}) {
+  const source = ts.createSourceFile("main.ts", read("main.ts"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const declaration = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "createSubscription");
+  assert.ok(declaration);
+  const elements = new Map();
+  const element = id => {
+    if (!elements.has(id)) elements.set(id, { textContent: "", value: "draft", hidden: false, disabled: false, className: "", setAttribute() {} });
+    return elements.get(id);
+  };
+  const calls = [], notices = [];
+  element("#managed-subscription-form").reset = () => { element("#managed-subscription-url").value = ""; calls.push("reset"); };
+  const card = { dataset: { subscriptionId: "new-fixture" }, focus() { calls.push("focus"); }, scrollIntoView() { calls.push("scroll"); } };
+  class FixtureElement {}
+  const listeners = new Map();
+  element("#managed-subscription-form").contains = () => false;
+  const context = vm.createContext({
+    $, console, Array, Error, HTMLElement: FixtureElement, viewNavigationRevision: 0,
+    subscriptionImporting: false, subscriptionDraftDirty: true, subscriptionActivationTouched: true,
+    highlightedSubscriptionId: null, store: { view: options.view ?? "subscriptions" },
+    describeSubscriptionImport, errorMessage: error => error.message,
+    api: { createSubscriptionProfile: async (...args) => { calls.push(args); if (options.wait) await options.wait; if (options.failure) throw new Error(options.failure); return options.result ?? importResult(); } },
+    refreshBase: async () => { calls.push("refresh"); if (options.refreshFailure) throw new Error("refresh failed"); return options.refreshApplied !== false; },
+    closeSubscriptionForm: () => { calls.push("close"); },
+    toast: (text, tone) => notices.push({ text, tone }),
+    document: { querySelectorAll: () => options.missingCard ? [] : [card], addEventListener: (key, listener) => listeners.set(key, listener), removeEventListener: key => listeners.delete(key) },
+  });
+  function $(id) { return element(id); }
+  vm.runInContext(ts.transpileModule(declaration.getText(source), { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText, context);
+  return { context, element, calls, notices, moveFocus: () => listeners.get("focusin")?.({ target: new FixtureElement() }), submit: (activate = false) => context.createSubscription("fixture", "https://new.example.invalid/subscription", "clash.meta", true, activate) };
+}
+test("actual import controller transmits explicit false/true, resets only on success and focuses its card", async () => {
+  for (const activate of [false, true]) {
+    const f = importControllerFixture({ result: importResult({ activated: activate }) });
+    await f.submit(activate);
+    assert.equal(f.calls[0][4], activate);
+    assert.equal(f.element("#managed-subscription-url").value, "");
+    assert.ok(f.calls.includes("close")); assert.ok(f.calls.includes("focus"));
+    assert.equal(f.context.subscriptionImporting, false);
+    assert.equal(f.element("#managed-subscription-fields").disabled, false);
+  }
+});
+test("HTTP 403 keeps the draft, displays the actual error and permits retry", async () => {
+  const f = importControllerFixture({ failure: "SUBSCRIPTION_ERROR: HTTP 403" });
+  await f.submit();
+  assert.equal(f.element("#managed-subscription-url").value, "draft");
+  assert.equal(f.context.subscriptionDraftDirty, true);
+  assert.match(f.element("#managed-subscription-import-status").textContent, /HTTP 403/);
+  assert.equal(f.calls.includes("close"), false); assert.equal(f.context.subscriptionImporting, false);
+  assert.equal(f.element("#managed-subscription-fields").disabled, false);
+});
+test("double submission is ignored while fields are locked; selection input cannot change midflight", async () => {
+  let complete; const wait = new Promise(resolve => { complete = resolve; });
+  const f = importControllerFixture({ wait });
+  const pending = f.submit(false);
+  assert.equal(f.element("#managed-subscription-fields").disabled, true);
+  await f.submit(true);
+  assert.equal(f.calls.filter(Array.isArray).length, 1);
+  complete(); await pending;
+  assert.equal(f.calls[0][4], false);
+});
+test("post-save refresh failures never call the completed import a failure or retain a resubmittable URL", async () => {
+  for (const options of [{ refreshFailure: true }, { missingCard: true }, { refreshApplied: false }, { refreshApplied: false, result: importResult({ created: false }) }]) {
+    const f = importControllerFixture(options); await f.submit();
+    assert.equal(f.element("#managed-subscription-url").value, "");
+    assert.match(f.element("#subscriptions-feedback").textContent, /(?:订阅已添加|该订阅已存在).*无需重复添加/);
+    assert.equal(f.notices.some(notice => notice.tone === "error"), false);
+  }
+});
+test("leaving then returning or focusing another control during import cancels automatic card focus", async () => {
+  for (const changeFocus of [f => { f.context.viewNavigationRevision += 2; }, f => f.moveFocus()]) {
+    let complete; const wait = new Promise(resolve => { complete = resolve; });
+    const f = importControllerFixture({ wait }); const pending = f.submit();
+    changeFocus(f); complete(); await pending;
+    assert.equal(f.calls.includes("focus"), false);
+  }
+});
+test("default selection requires an authoritative empty active profile; unknown or failed first reads are save-only", () => {
+  const source = ts.createSourceFile("main.ts", read("main.ts"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const declaration = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "openSubscriptionForm");
+  for (const [appInfo, activeProfile, expected] of [[null, null, false], [{}, null, true], [{}, { profile: {} }, false]]) {
+    const checkbox = { checked: false }, panel = { hidden: true };
+    const context = vm.createContext({ Boolean, subscriptionImporting: false, subscriptionDraftDirty: false, subscriptionActivationTouched: false,
+      store: { appInfo, activeProfile, view: "overview" }, renderSubscriptionActivationHint() {},
+      $: id => id === "#managed-subscription-activate" ? checkbox : id === "#managed-subscription-panel" ? panel : { setAttribute() {} } });
+    vm.runInContext(ts.transpileModule(declaration.getText(source), { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText, context);
+    context.openSubscriptionForm(false); assert.equal(checkbox.checked, expected); assert.equal(panel.hidden, false);
+  }
+});
+test("generation failure stays a saved-subscription warning and does not steal focus after navigation", async () => {
+  const f = importControllerFixture({ view: "overview", result: importResult({ openAiGeneration: "failed", openAiError: "task busy" }) });
+  await f.submit();
+  assert.equal(f.calls.includes("focus"), false);
+  assert.match(f.element("#subscriptions-feedback").textContent, /订阅已添加.*task busy/);
+  assert.equal(f.element("#subscriptions-feedback").className, "subscription-feedback is-warning");
+  assert.equal(f.notices[0].tone, "info");
 });

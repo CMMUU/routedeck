@@ -198,6 +198,14 @@ export type ProfileOperationResult = {
   updated: boolean;
 };
 
+export type SubscriptionImportResult = ProfileOperationResult & {
+  created: boolean;
+  activated: boolean;
+  openAiGeneration: "not_requested" | "started" | "failed";
+  openAiError: string | null;
+  observationError: string | null;
+};
+
 export type ProfileDetails = {
   profile: ProfileRecord;
   revisions: ConfigRevision[];

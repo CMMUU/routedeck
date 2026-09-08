@@ -7,6 +7,34 @@
 .subscription-card-heading h3, .subscription-import-card h3 { font-size: 18px; line-height: 26px; }
 .subscription-card-heading p, .subscription-import-card > div > p { font-size: 13px; line-height: 20px; }
 .subscription-import-card { display: block; background: var(--panel); border-radius: var(--radius-panel); }
+.subscription-import-card[hidden], .subscription-feedback[hidden], .subscription-onboarding[hidden] { display: none; }
+.subscription-panel-heading > .toolbar { flex-wrap: wrap; justify-content: flex-end; }
+.subscription-import-heading h3 { margin: 0; font-weight: 600; }
+.subscription-import-card > .subscription-import-heading > p { margin: 4px 0 20px; color: var(--muted); font-size: 14px; line-height: 22px; }
+#managed-subscription-fields { border: 0; padding: 0; margin: 0; min-width: 0; display: grid; gap: 16px; }
+.subscription-import-fields { display: grid; grid-template-columns: minmax(0,2fr) minmax(180px,1fr); gap: 16px; }
+.subscription-import-fields label, .subscription-import-advanced label { display: grid; gap: 8px; min-width: 0; }
+.subscription-import-fields label > span, .subscription-import-advanced label > span { font-size: 14px; line-height: 22px; color: var(--text); }
+.subscription-import-fields input, .subscription-import-advanced input { min-width: 0; width: 100%; font-size: 14px; }
+#managed-subscription-form .subscription-import-option { display: flex; align-items: start; gap: 12px; margin: 0; cursor: pointer; }
+.subscription-import-option > input { width: 18px; height: 18px; min-height: 18px; flex: 0 0 18px; padding: 0; margin: 3px 0 0; accent-color: var(--accent); }
+.subscription-import-option > span { display: grid; gap: 2px; }
+.subscription-import-option strong { font-size: 14px; line-height: 22px; font-weight: 500; color: var(--text); }
+.subscription-import-option small { font-size: 13px; line-height: 20px; color: var(--muted); }
+.subscription-import-advanced { border-top: 1px solid var(--line); padding-top: 12px; }
+.subscription-import-advanced summary { width: fit-content; cursor: pointer; color: var(--muted); font-size: 14px; line-height: 22px; border-radius: 6px; }
+.subscription-import-advanced label { margin-top: 12px; max-width: 420px; }
+.subscription-import-advanced p { margin: 8px 0 0; color: var(--muted); font-size: 13px; line-height: 20px; }
+.subscription-import-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+#managed-subscription-import-status:empty { display: none; }
+#managed-subscription-import-status { margin: 16px 0 0; font-size: 14px; line-height: 22px; overflow-wrap: anywhere; }
+.subscription-feedback { margin: 0; padding: 12px 16px; color: var(--text); background: var(--accent-soft); border-radius: var(--radius-control); font-size: 14px; line-height: 22px; overflow-wrap: anywhere; }
+.subscription-feedback.is-warning { border-left: 3px solid var(--warning); }
+.subscription-tile.is-imported { outline: 2px solid var(--accent); outline-offset: 3px; }
+.subscription-onboarding { display: flex; align-items: center; flex-wrap: wrap; gap: 20px; }
+.subscription-onboarding h2 { margin: 0; font-size: 18px; line-height: 26px; }
+.subscription-onboarding p { margin: 6px 0 0; color: var(--muted); font-size: 14px; line-height: 22px; }
+.subscription-onboarding > .button { margin-left: auto; }
 .subscription-import-card > summary { display: flex; align-items: center; gap: 12px; list-style: none; cursor: pointer; border-radius: 6px; font-size: 14px; line-height: 22px; }
 .subscription-import-card > summary::-webkit-details-marker { display: none; }
 .subscription-import-card > summary > span:first-child { font-weight: 600; }
@@ -76,6 +104,7 @@
 .subscription-more-body p { margin: 12px 0; color: var(--muted); font-size: 13px; line-height: 20px; overflow-wrap: anywhere; }
 .subscription-more-body .toolbar { flex-wrap: wrap; gap: 8px; }
 @container subscriptions (max-width: 850px) {
+  .subscription-import-fields { grid-template-columns: minmax(0,1fr); }
   .subscription-manager-list { grid-template-columns: minmax(0,1fr); }
   .subscription-summary-grid { grid-template-columns: repeat(2,minmax(0,1fr)); row-gap: 12px; }
   .subscription-summary-grid > div:nth-child(2n) { border-right: 0; }

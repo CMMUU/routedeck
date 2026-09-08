@@ -3,6 +3,7 @@ import "./desktop-theme.css";
 import "./local-routing.css";
 import "./subscription-cards.css";
 import { subscriptionCardMarkup } from "./subscription-cards";
+import { subscriptionImportMarkup, describeSubscriptionImport } from "./subscription-import";
 import { NAV_ITEMS, navigationMarkup, type ViewName } from "./ui";
 import { preferencesMarkup } from "./settings-view";
 import { canStartRuntime, startRuntimeInMode, type RuntimeStartMode } from "./runtime-start";
@@ -114,6 +115,11 @@ const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("#app not found");
 const appIconUrl = new URL("../assets/brand/app-icon-128.png", import.meta.url).href;
 let subscriptionImporting = false;
+let subscriptionFormInitialized = false;
+let subscriptionDraftDirty = false;
+let subscriptionActivationTouched = false;
+let highlightedSubscriptionId: string | null = null;
+let viewNavigationRevision = 0;
 const subscriptionRefreshing = new Set<string>();
 let openAiTaskFinishedAt: string | null = null;
 let networkModeSwitching = false;
@@ -246,17 +252,9 @@ app.innerHTML = `
           <article class="metric-card"><span>规则</span><strong id="metric-rules">—</strong><small>active profile</small></article>
           <article class="metric-card"><span>运行阶段</span><strong id="metric-phase">—</strong><small>runtime state</small></article>
         </div>
-        <article class="panel quick-panel">
-          <div class="panel-heading"><div><div class="section-label">快速开始</div><h2>从订阅创建可回滚配置</h2></div></div>
-          <form id="quick-subscription-form" class="form-grid form-grid-compact">
-            <input id="quick-name" required placeholder="配置名称" value="我的订阅" />
-            <input id="quick-url" required type="url" placeholder="HTTPS 订阅地址" autocomplete="off" spellcheck="false" />
-            <input id="quick-ua" value="clash.meta" aria-label="User-Agent" />
-            <button class="button button-primary" id="quick-import-button" type="submit">导入并激活</button>
-          </form>
-          <label class="inline-option"><input id="quick-openai-auto" type="checkbox" checked /><span>导入后在后台筛选 10 个 OpenAI 自动灾备节点</span></label>
-          <p class="hint">订阅会先经过 YAML 解析、本机控制字段覆盖和 Mihomo 原生校验，成功后才激活。</p>
-          <p class="import-status" id="quick-import-status"></p>
+        <article class="panel subscription-onboarding" id="overview-subscription-guide" hidden>
+          <div><h2>先选用一个配置</h2><p>在「订阅」统一添加和选用订阅，本地 YAML 仍在「配置」管理。</p></div>
+          <button class="button button-quiet" id="overview-go-subscriptions" type="button">前往订阅</button>
         </article>
       </section>
 
@@ -270,26 +268,12 @@ app.innerHTML = `
             <div class="toolbar">
               <button class="button button-quiet" id="subscriptions-run-safety">安全检查</button>
               <button class="button button-quiet" id="subscriptions-refresh-all">刷新全部</button>
+              <button class="button button-primary" id="subscriptions-add" type="button" aria-controls="managed-subscription-panel" aria-expanded="false">＋ 添加订阅</button>
             </div>
           </div>
           <div class="subscription-workspace">
-            <details class="subscription-import-card" id="managed-subscription-panel">
-              <summary><span id="managed-subscription-title">添加订阅</span><span>验证并保存新的订阅来源</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></summary>
-              <div class="subscription-import-body">
-              <div class="subscription-import-intro"><p>验证地址、解析配置并保存首个可回滚版本。敏感参数仅在本机存储。</p></div>
-              <form id="managed-subscription-form" class="managed-subscription-form">
-                <label class="managed-field managed-name-field"><span>订阅名称</span><input id="managed-subscription-name" required value="我的订阅" maxlength="128" /></label>
-                <label class="managed-field managed-url-field"><span>订阅地址</span><input id="managed-subscription-url" required type="url" placeholder="https://example.com/subscribe?token=…" autocomplete="off" spellcheck="false" /></label>
-                <label class="managed-field managed-ua-field"><span>User-Agent</span><input id="managed-subscription-ua" value="clash.meta" /></label>
-                <label class="managed-import-option"><input id="managed-subscription-openai" type="checkbox" checked /><span><strong>OpenAI 灾备</strong><small>导入后自动生成</small></span></label>
-                <div class="managed-submit-stack">
-                  <button class="button button-primary" id="managed-subscription-import-button" type="submit">验证并添加</button>
-                  <small>导入前先执行 YAML 校验与端口安全检查</small>
-                </div>
-              </form>
-              <p class="import-status" id="managed-subscription-import-status"></p>
-              </div>
-            </details>
+            ${subscriptionImportMarkup}
+            <p id="subscriptions-feedback" class="subscription-feedback" role="status" aria-live="polite" hidden></p>
             <div class="subscription-summary-grid">
               <div><span>活动订阅</span><strong id="subscription-summary-active">—</strong></div>
               <div><span>配置规模</span><strong id="subscription-summary-nodes">尚未读取</strong></div>
@@ -319,18 +303,7 @@ app.innerHTML = `
           </article>
         </div>
         <article class="panel">
-          <div class="panel-heading"><div><div class="section-label">IMPORT</div><h2>新增远程订阅</h2></div></div>
-          <form id="subscription-form" class="form-grid">
-            <label><span>名称</span><input id="subscription-name" required value="我的订阅" /></label>
-            <label class="span-2"><span>订阅地址</span><input id="subscription-url" required type="url" placeholder="https://…" autocomplete="off" spellcheck="false" /></label>
-            <label><span>User-Agent</span><input id="subscription-ua" value="clash.meta" /></label>
-            <label class="checkbox-row"><input id="subscription-openai-auto" type="checkbox" checked /><span>导入后自动生成 OpenAI 灾备组</span></label>
-            <button class="button button-primary align-end" id="subscription-import-button" type="submit">获取、校验并创建</button>
-          </form>
-          <p class="import-status" id="subscription-import-status"></p>
-        </article>
-        <article class="panel">
-          <div class="panel-heading"><div><div class="section-label">LOCAL YAML</div><h2>本地或内联配置</h2></div><label class="button button-quiet file-button" for="yaml-file">打开 YAML</label></div>
+          <div class="panel-heading"><div><div class="section-label">LOCAL YAML</div><h2>本地 YAML 配置</h2></div><label class="button button-quiet file-button" for="yaml-file">打开 YAML</label></div>
           <input id="yaml-file" type="file" accept=".yaml,.yml,text/plain" hidden />
           <div class="editor-toolbar">
             <input id="inline-name" class="profile-name" value="本地配置" aria-label="配置名称" />
@@ -676,8 +649,9 @@ async function refreshBase() {
       openAiTask,
       globalTraffic,
     });
+    return true;
   });
-  if (result === null) return;
+  if (result !== true) return false;
   renderHeader();
   renderOverview();
   renderProfiles();
@@ -686,6 +660,7 @@ async function refreshBase() {
   renderOpenAiPolicy();
   renderGlobalTraffic();
   scheduleAutomaticUpdateCheck();
+  return true;
 }
 
 function renderHeader() {
@@ -735,6 +710,7 @@ function renderHeader() {
 }
 
 function renderOverview() {
+  $("#overview-subscription-guide")!.hidden = !store.appInfo || Boolean(store.activeProfile);
   const runtime = store.runtime;
   const running = runtime?.phase === "running";
   $("#connection-state")!.textContent = phaseLabel(runtime?.phase);
@@ -789,6 +765,14 @@ function renderSubscriptions() {
   const list = $("#subscription-manager-list");
   if (!list) return;
   const subscriptions = store.subscriptions;
+  if (store.appInfo && !subscriptionFormInitialized) {
+    subscriptionFormInitialized = true;
+    if (!subscriptions.length) openSubscriptionForm(false);
+  }
+  if (!subscriptionActivationTouched && !subscriptionImporting) {
+    ($("#managed-subscription-activate") as HTMLInputElement).checked = Boolean(store.appInfo) && !store.activeProfile;
+  }
+  renderSubscriptionActivationHint();
   const active = subscriptions.find((subscription) => subscription.active);
   const totalNodes = subscriptions.reduce(
     (total, subscription) =>
@@ -817,7 +801,6 @@ function renderSubscriptions() {
   $("#subscription-list-caption")!.textContent = `${subscriptions.length} 个订阅 · ${subscriptions.filter((subscription) => subscription.profile.openaiPolicy.autoMaintain).length} 个自动维护`;
 
   if (!subscriptions.length) {
-    ($("#managed-subscription-panel") as HTMLDetailsElement).open = true;
     list.className = "subscription-manager-list empty-state";
     list.textContent = "还没有远程订阅，可在顶部添加。";
     return;
@@ -829,6 +812,37 @@ function renderSubscriptions() {
   for (const details of list.querySelectorAll<HTMLDetailsElement>(".subscription-more")) {
     details.open = expanded.has(details.closest<HTMLElement>("[data-subscription-id]")?.dataset.subscriptionId);
   }
+  for (const card of list.querySelectorAll<HTMLElement>("[data-subscription-id]")) {
+    card.tabIndex = -1;
+    card.classList.toggle("is-imported", card.dataset.subscriptionId === highlightedSubscriptionId);
+  }
+}
+
+function renderSubscriptionActivationHint() {
+  const selected = ($("#managed-subscription-activate") as HTMLInputElement).checked;
+  $("#managed-subscription-activate-hint")!.textContent = !selected
+    ? "仅保存，不替换当前配置；需要时再点击卡片上的「选用」。"
+    : store.runtime?.phase === "running"
+      ? "校验成功后切换运行中的配置，可能影响现有连接；不会改变系统代理或 TUN 模式。"
+      : "校验成功后设为当前配置，不会自动启动核心或开启系统代理。";
+}
+
+function openSubscriptionForm(focus = true) {
+  if (subscriptionImporting) return;
+  if (!subscriptionDraftDirty) {
+    subscriptionActivationTouched = false;
+    ($("#managed-subscription-activate") as HTMLInputElement).checked = Boolean(store.appInfo) && !store.activeProfile;
+  }
+  $("#managed-subscription-panel")!.hidden = false;
+  $("#subscriptions-add")!.setAttribute("aria-expanded", "true");
+  renderSubscriptionActivationHint();
+  if (focus && store.view === "subscriptions") $("#managed-subscription-url")!.focus();
+}
+
+function closeSubscriptionForm(returnFocus = true) {
+  $("#managed-subscription-panel")!.hidden = true;
+  $("#subscriptions-add")!.setAttribute("aria-expanded", "false");
+  if (returnFocus && store.view === "subscriptions") $("#subscriptions-add")!.focus();
 }
 
 function renderProfiles() {
@@ -1387,70 +1401,77 @@ async function createSubscription(
   url: string,
   userAgent: string,
   generateOpenAi: boolean,
+  activateAfterImport: boolean,
 ) {
   if (subscriptionImporting) {
     toast("已有订阅正在导入，请等待当前校验完成", "info");
     return;
   }
   subscriptionImporting = true;
-  const buttons = [
-    $("#quick-import-button"),
-    $("#subscription-import-button"),
-    $("#managed-subscription-import-button"),
-  ].filter((button): button is HTMLButtonElement => button instanceof HTMLButtonElement);
-  const statuses = [
-    $("#quick-import-status"),
-    $("#subscription-import-status"),
-    $("#managed-subscription-import-status"),
-  ].filter(Boolean) as HTMLElement[];
-  buttons.forEach((button) => {
-    button.disabled = true;
-    button.dataset.originalText = button.textContent ?? "";
-    button.textContent = "正在校验…";
-  });
-  statuses.forEach((status) => {
-    status.className = "import-status is-loading";
-    status.textContent =
-      "正在获取订阅并执行 Mihomo 原生校验。首次导入可能下载 GeoIP／GeoSite 数据，需要约 1～2 分钟，请保持窗口打开。";
-  });
+  const form = $("#managed-subscription-form") as HTMLFormElement;
+  const fields = $("#managed-subscription-fields") as HTMLFieldSetElement;
+  const button = $("#managed-subscription-import-button") as HTMLButtonElement;
+  const add = $("#subscriptions-add") as HTMLButtonElement;
+  const status = $("#managed-subscription-import-status")!;
+  const feedback = $("#subscriptions-feedback")!;
+  const requestedViewRevision = viewNavigationRevision;
+  let focusInterrupted = false;
+  const trackFocus = (event: FocusEvent) => {
+    if (event.target instanceof HTMLElement && event.target !== document.body && !form.contains(event.target)) focusInterrupted = true;
+  };
+  document.addEventListener("focusin", trackFocus);
+  fields.disabled = true;
+  add.disabled = true;
+  form.setAttribute("aria-busy", "true");
+  button.textContent = "正在校验…";
+  feedback.hidden = true;
+  status.className = "import-status is-loading";
+  status.textContent = "正在获取订阅并执行 Mihomo 原生校验。首次导入可能需要 1～2 分钟，请保持窗口打开。";
   try {
     const result = await api.createSubscriptionProfile(
       name,
       url,
       userAgent,
       generateOpenAi,
+      activateAfterImport,
     );
-    await refreshBase();
-    store.selectedProfile = await api.profileDetails(result.profile.id);
-    renderProfiles();
-    statuses.forEach((status) => {
-      status.className = "import-status is-success";
-      status.textContent = result.updated
-        ? "订阅已通过校验并激活。"
-        : "该订阅已经存在，当前内容没有变化。";
-    });
-    ($("#quick-url") as HTMLInputElement).value = "";
-    ($("#subscription-url") as HTMLInputElement).value = "";
-    ($("#managed-subscription-url") as HTMLInputElement).value = "";
-    toast(result.updated ? "订阅已创建并激活" : "订阅已存在且内容未变化", "success");
-    if (generateOpenAi) {
-      store.openAiTask = await api.openAiPolicyTask();
-      renderOpenAiPolicy();
-      toast("订阅已激活，正在后台筛选 OpenAI 灾备节点", "info");
+    // The write has succeeded. A later list/status read must never report it as
+    // an import failure or encourage another submission of the same URL.
+    const description = describeSubscriptionImport(result);
+    form.reset();
+    subscriptionDraftDirty = false;
+    subscriptionActivationTouched = false;
+    status.textContent = "";
+    highlightedSubscriptionId = result.profile.id;
+    closeSubscriptionForm(false);
+    feedback.hidden = false;
+    feedback.className = `subscription-feedback${description.warning ? " is-warning" : ""}`;
+    feedback.textContent = description.text;
+    toast(description.text, description.warning ? "info" : "success");
+    try {
+      if (!await refreshBase()) throw new Error("订阅列表尚未更新");
+      const card = Array.from(document.querySelectorAll<HTMLElement>("[data-subscription-id]"))
+        .find((item) => item.dataset.subscriptionId === result.profile.id);
+      if (!card) throw new Error("订阅列表尚未更新");
+      if (store.view === "subscriptions" && viewNavigationRevision === requestedViewRevision && !focusInterrupted) {
+        card.focus({ preventScroll: true });
+        card.scrollIntoView({ block: "nearest" });
+      }
+    } catch {
+      feedback.textContent += " 列表状态未能刷新，请点击「刷新列表」；无需重复添加。";
     }
   } catch (error) {
     const message = errorMessage(error);
-    statuses.forEach((status) => {
-      status.className = "import-status is-error";
-      status.textContent = message;
-    });
+    status.className = "import-status is-error";
+    status.textContent = message;
     toast(message, "error");
   } finally {
+    document.removeEventListener("focusin", trackFocus);
     subscriptionImporting = false;
-    buttons.forEach((button) => {
-      button.disabled = false;
-      button.textContent = button.dataset.originalText ?? "导入";
-    });
+    fields.disabled = false;
+    add.disabled = false;
+    form.setAttribute("aria-busy", "false");
+    button.textContent = "验证并添加";
   }
 }
 
@@ -2053,6 +2074,7 @@ const ruleManager = mountRuleManager($("#rules-view")!, {
 
 function navigate(view: ViewName) {
   const previousView = store.view;
+  if (previousView !== view) viewNavigationRevision++;
   const scroller = $("#page-scroll");
   if (previousView !== view && scroller) {
     viewScrollPositions[previousView] = scroller.scrollTop;
@@ -2127,26 +2149,14 @@ $("#connections-refresh")!.addEventListener("click", () => void refreshConnectio
 $("#logs-refresh")!.addEventListener("click", () => void refreshLogs());
 $("#run-diagnostics")!.addEventListener("click", () => void runDiagnostics());
 
-$("#quick-subscription-form")!.addEventListener("submit", (event) => {
-  event.preventDefault();
-  void createSubscription(
-    ($("#quick-name") as HTMLInputElement).value.trim(),
-    ($("#quick-url") as HTMLInputElement).value.trim(),
-    ($("#quick-ua") as HTMLInputElement).value.trim() || "clash.meta",
-    ($("#quick-openai-auto") as HTMLInputElement).checked,
-  );
+$("#overview-go-subscriptions")!.addEventListener("click", () => navigate("subscriptions"));
+$("#subscriptions-add")!.addEventListener("click", () => openSubscriptionForm());
+$("#managed-subscription-cancel")!.addEventListener("click", () => closeSubscriptionForm());
+$("#managed-subscription-form")!.addEventListener("input", () => { subscriptionDraftDirty = true; });
+$("#managed-subscription-activate")!.addEventListener("change", () => {
+  subscriptionActivationTouched = true;
+  renderSubscriptionActivationHint();
 });
-
-$("#subscription-form")!.addEventListener("submit", (event) => {
-  event.preventDefault();
-  void createSubscription(
-    ($("#subscription-name") as HTMLInputElement).value.trim(),
-    ($("#subscription-url") as HTMLInputElement).value.trim(),
-    ($("#subscription-ua") as HTMLInputElement).value.trim() || "clash.meta",
-    ($("#subscription-openai-auto") as HTMLInputElement).checked,
-  );
-});
-
 $("#managed-subscription-form")!.addEventListener("submit", (event) => {
   event.preventDefault();
   void createSubscription(
@@ -2154,6 +2164,7 @@ $("#managed-subscription-form")!.addEventListener("submit", (event) => {
     ($("#managed-subscription-url") as HTMLInputElement).value.trim(),
     ($("#managed-subscription-ua") as HTMLInputElement).value.trim() || "clash.meta",
     ($("#managed-subscription-openai") as HTMLInputElement).checked,
+    ($("#managed-subscription-activate") as HTMLInputElement).checked,
   );
 });
 

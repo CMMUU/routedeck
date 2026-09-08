@@ -27,6 +27,7 @@ import type {
   RuntimeStatus,
   SystemProxyStatus,
   SubscriptionOverview,
+  SubscriptionImportResult,
   TunHelperStatus,
   UserRule,
   UserRulesState,
@@ -70,12 +71,14 @@ export const api = {
     url: string,
     userAgent: string,
     generateOpenAi = false,
+    activateAfterImport = false,
   ) =>
-    invoke<ProfileOperationResult>("create_subscription_profile", {
+    invoke<SubscriptionImportResult>("create_subscription_profile", {
       displayName,
       url,
       userAgent,
       generateOpenAi,
+      activateAfterImport,
     }),
   refreshProfile: (profileId: string) =>
     invoke<ProfileOperationResult>("refresh_profile", { profileId }),

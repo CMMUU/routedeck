@@ -30,7 +30,9 @@ use mihomo_api::MihomoApiClient;
 use models::{AppSettings, NetworkMode, PublicAppSettings, PublicProfileRecord, RoutingMode};
 use openai_policy::{OpenAiPolicyTaskManager, OpenAiPolicyTaskSnapshot};
 use platform::SystemProxyStatus;
-use profile_service::{ProfileDetails, ProfileOperationResult, SubscriptionOverview};
+use profile_service::{
+    ProfileDetails, ProfileOperationResult, SubscriptionImportResult, SubscriptionOverview,
+};
 use runtime::{BinaryInfo, MihomoRuntime, RuntimeLog, RuntimeStatus};
 use serde::Serialize;
 use serde_json::Value;
@@ -269,14 +271,22 @@ async fn create_subscription_profile(
     url: String,
     user_agent: String,
     generate_openai: Option<bool>,
-) -> Result<ProfileOperationResult, AppErrorDto> {
+    activate_after_import: Option<bool>,
+) -> Result<SubscriptionImportResult, AppErrorDto> {
     let _permit = guard.acquire().map_err(dto)?;
-    let result = profile_service::create_subscription_profile(&app, display_name, url, user_agent)
-        .await
-        .map_err(dto)?;
-    if generate_openai.unwrap_or(false) {
-        let _ = openai_policy::start_generation(&app, result.profile.id, true);
-    }
+    let mut result = profile_service::create_subscription_profile(
+        &app,
+        display_name,
+        url,
+        user_agent,
+        activate_after_import.unwrap_or(false),
+    )
+    .await
+    .map_err(dto)?;
+    let profile_id = result.operation.profile.id;
+    result.start_openai_generation(generate_openai.unwrap_or(false), || {
+        openai_policy::start_generation(&app, profile_id, true)
+    });
     Ok(result)
 }
 

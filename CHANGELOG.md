@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.6 - 2026-09-08
+
+- Make Subscriptions the single entry point for adding subscription URLs. Overview empty states navigate there; Profiles retains local YAML import, configuration management and version rollback.
+- Keep the add form compact, with clear primary fields and collapsible advanced options. Make “use after adding” explicit and leave it unchecked by default when an active profile already exists.
+- Focus the saved subscription card after successful addition unless the user has navigated or moved focus, and retain the form draft when addition fails. Report optional OpenAI failover generation and observation-write errors separately so they do not misrepresent a saved subscription as a failed import.
+- Reuse exact duplicate subscription URLs without fetching or refreshing them; explicitly selecting a duplicate uses its saved revision. Recheck duplicates inside the configuration transaction.
+- Preserve the Serylane display brand and S icon, RouteDeck installer/update identities, existing signing key and domestic-first updates with GitHub fallback. Opening the add form does not start the core, change system proxy/TUN or attach Codex.
+- Treat saved/selected configuration state, real connectivity, published installers and completed mirror verification as separate outcomes; no uninterrupted-connectivity guarantee is made.
+
 ## 0.7.5 - 2026-09-08
 
 - Make the global Start action start the Mihomo core with system proxy enabled, instead of inheriting a previous core-only mode.

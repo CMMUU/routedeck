@@ -10,7 +10,7 @@ import type {
   AppSettings, AppUpdateStatus, UpdateSource, ProfileDetails, ProfileRecord,
   UserRule, UserRulesState, UserRulesValidation,
   ProgramInput, ProgramState, RouteSettings, RouteSnapshot,
-  SubscriptionMetadata, SubscriptionOverview, SubscriptionStatus, NetworkMode,
+  SubscriptionMetadata, SubscriptionOverview, SubscriptionStatus, NetworkMode, OpenAiPolicyTask,
 } from "../../src/types";
 import type { ThemePreference } from "../../src/theme";
 
@@ -501,11 +501,24 @@ function makeProfile(id: string, displayName: string, enabled: boolean): Profile
 }
 
 // Every record is synthetic, including usage and provider error text. Neither
-// scenario changes nor the three mock actions read a subscription or touch the
+// scenario changes nor the mock actions read a subscription or touch the
 // live core, proxy settings, active desktop profile, or native filesystem.
 let profiles: ProfileRecord[] = [];
 let activeProfileId: string | null = null;
-const subscriptionCalls = { reads: 0, refresh: 0, activate: 0, delete: 0 };
+const subscriptionCalls = { reads: 0, refresh: 0, activate: 0, delete: 0, create: 0 };
+const subscriptionImportScenarios = new Set(["import", "import-empty", "import-403", "import-duplicate", "import-openai-failed"]);
+const subscriptionScenarios = new Set(["default", "cards", "empty", ...subscriptionImportScenarios]);
+let subscriptionImportScenario: string | null = null;
+let subscriptionScenarioRevision = 0;
+let subscriptionImportBusy = false;
+let subscriptionImportSequence = 0;
+let subscriptionImportResult: unknown = null;
+const subscriptionImportCalls: { host: string; activateAfterImport: boolean; generateOpenAi: boolean }[] = [];
+// Only reserved .invalid URLs are accepted; even fixture input cannot contact
+// a provider or expose a real subscription URL through the diagnostic dataset.
+const subscriptionImportUrls = new Map<string, string>();
+const idleSubscriptionOpenAiTask = (): OpenAiPolicyTask => ({ running: false, profileId: null, phase: "idle", completed: 0, total: 0, message: "合成预览不执行健康检测", startedAt: null, finishedAt: null, error: null, result: null });
+let subscriptionImportOpenAiTask = idleSubscriptionOpenAiTask();
 const subscriptionSamples = new Map<string, {
   metadata: SubscriptionMetadata;
   fetchedAt: string;
@@ -531,15 +544,31 @@ function subscriptions(): SubscriptionOverview[] {
 function reportSubscriptions() {
   document.documentElement.dataset.fixtureSubscriptionsState = JSON.stringify(subscriptions());
   document.documentElement.dataset.fixtureSubscriptionsCalls = JSON.stringify(subscriptionCalls);
+  document.documentElement.dataset.fixtureSubscriptionImportState = JSON.stringify({ enabled: subscriptionImportScenario !== null, scenario: subscriptionImportScenario, busy: subscriptionImportBusy, activeProfileId, profileCount: profiles.length });
+  document.documentElement.dataset.fixtureSubscriptionImportCalls = JSON.stringify(subscriptionImportCalls);
+  document.documentElement.dataset.fixtureSubscriptionImportResult = JSON.stringify(subscriptionImportResult);
 }
 
 function subscriptionScenario(scenario: string) {
+  subscriptionScenarioRevision++;
+  subscriptionImportScenario = subscriptionImportScenarios.has(scenario) ? scenario : null;
+  subscriptionImportUrls.clear();
+  subscriptionImportCalls.length = 0;
+  subscriptionImportResult = null;
+  subscriptionImportOpenAiTask = idleSubscriptionOpenAiTask();
+  subscriptionCalls.create = 0;
   subscriptionSamples.clear();
-  profiles = scenario === "empty" ? [] : [
+  profiles = scenario === "empty" || scenario === "import-empty" ? [] : [
     makeProfile("fixture-active", "演示订阅 · 活动", true),
     makeProfile("fixture-inactive", "演示订阅 · 备用（可预览删除弹窗）", false),
   ];
   activeProfileId = profiles[0]?.id ?? null;
+  if (subscriptionImportScenario && profiles.length) {
+    profiles[0].source = { type: "remote_subscription", host: "active.example.invalid", userAgent: "fixture-only" };
+    profiles[1].source = { type: "remote_subscription", host: "duplicate.example.invalid", userAgent: "fixture-only" };
+    subscriptionImportUrls.set("https://active.example.invalid/subscription", profiles[0].id);
+    subscriptionImportUrls.set("https://duplicate.example.invalid/subscription", profiles[1].id);
+  }
   if (scenario === "cards") {
     const gib = 1024 ** 3;
     profiles = [
@@ -574,7 +603,7 @@ function subscriptionScenario(scenario: string) {
 
 window.addEventListener("routedeck-fixture-subscriptions", event => {
   const detail = (event as CustomEvent<{ scenario?: string; refresh?: boolean }>).detail;
-  if (!detail || !["cards", "empty"].includes(detail.scenario ?? "")) return;
+  if (!detail || !subscriptionScenarios.has(detail.scenario ?? "")) return;
   subscriptionScenario(detail.scenario!);
   if (detail.refresh === true) document.querySelector<HTMLButtonElement>("#subscriptions-refresh-list")?.click();
 });
@@ -633,7 +662,7 @@ const readonlyReplies: Record<string, () => unknown> = {
   list_profiles: () => structuredClone(profiles),
   list_subscriptions: () => { subscriptionCalls.reads++; reportSubscriptions(); return subscriptions(); },
   get_active_profile: () => activeProfileId ? profileDetails(activeProfileId) : null,
-  get_openai_policy_task: () => ({ running: false, profileId: null, phase: "idle", completed: 0, total: 0, message: "合成预览不执行健康检测", startedAt: null, finishedAt: null, error: null, result: null }),
+  get_openai_policy_task: () => structuredClone(subscriptionImportOpenAiTask),
   get_proxies: () => ({ proxies: {
     "演示节点选择": { type: "Selector", all: policy.selectedNodes.map((node) => node.name), now: policy.selectedNodes[0].name, udp: true },
     "🤖 OpenAI 自动灾备": { type: "Fallback", all: policy.selectedNodes.map((node) => node.name), now: policy.selectedNodes[0].name, udp: true, fixed: false },
@@ -668,6 +697,57 @@ function payloadRecord(payload: InvokeArgs | undefined): Record<string, unknown>
 
 mockIPC(async (command, payload) => {
   const args = payloadRecord(payload);
+  if (command === "create_subscription_profile" && subscriptionImportScenario !== null) {
+    if (subscriptionImportBusy) throw ruleError("STATE_CONFLICT", "合成订阅正在导入，请等待当前操作完成。");
+    if (typeof args.displayName !== "string" || !args.displayName.trim() || args.displayName.trim().length > 128
+      || typeof args.url !== "string" || typeof args.userAgent !== "string"
+      || typeof args.activateAfterImport !== "boolean" || typeof args.generateOpenAi !== "boolean") {
+      throw ruleError("INVALID_INPUT", "合成导入需要名称、URL、User-Agent 及明确的选用和灾备布尔值。");
+    }
+    let url: URL;
+    try {
+      url = new URL(args.url);
+      if (!["http:", "https:"].includes(url.protocol) || !url.hostname.endsWith(".invalid") || url.username || url.password) throw new Error("invalid");
+    } catch { throw ruleError("INVALID_INPUT", "隔离导入仅接受 http(s)://*.invalid 合成地址，不接受真实订阅或账号密码。"); }
+    const requestedRevision = subscriptionScenarioRevision;
+    const scenario = subscriptionImportScenario;
+    subscriptionImportBusy = true;
+    subscriptionCalls.create++;
+    subscriptionImportCalls.push({ host: url.hostname, activateAfterImport: args.activateAfterImport, generateOpenAi: args.generateOpenAi });
+    reportSubscriptions();
+    try {
+      await new Promise(resolve => window.setTimeout(resolve, 120));
+      if (requestedRevision !== subscriptionScenarioRevision) throw ruleError("STATE_CONFLICT", "合成场景已切换，旧导入没有写入新场景。");
+      if (scenario === "import-403") throw { code: "SUBSCRIPTION_ERROR", stage: "fixture_subscription", message: fixtureSubscriptionError, retryable: false };
+      const existingId = subscriptionImportUrls.get(url.href);
+      let profile = profiles.find(entry => entry.id === existingId);
+      const created = !profile;
+      if (!profile) {
+        profile = makeProfile(`fixture-import-${++subscriptionImportSequence}`, args.displayName.trim(), false);
+        profile.source = { type: "remote_subscription", host: url.hostname, userAgent: args.userAgent };
+        profile.openaiPolicy = { ...policy, enabled: false, autoMaintain: false, selectedNodes: [], candidateCount: 0, healthyCount: 0, lastBenchmarkedAt: null };
+        profiles.push(profile);
+        subscriptionImportUrls.set(url.href, profile.id);
+      }
+      // Existing URL reuse is read-only unless explicitly selected. It never
+      // invokes the refresh mock or changes the existing name/UA/revision.
+      const activated = args.activateAfterImport;
+      if (activated) activeProfileId = profile.id;
+      const requestOpenAi = args.generateOpenAi && (created || activated);
+      const openAiGeneration = !requestOpenAi ? "not_requested" : scenario === "import-openai-failed" ? "failed" : "started";
+      const openAiError = openAiGeneration === "failed" ? "合成状态：OpenAI 灾备任务提交失败；订阅已保存，未执行真实节点检测。" : null;
+      if (openAiGeneration !== "not_requested") {
+        const failed = openAiGeneration === "failed";
+        subscriptionImportOpenAiTask = { ...idleSubscriptionOpenAiTask(), running: !failed, profileId: profile.id, phase: failed ? "failed" : "preparing", message: failed ? openAiError! : "合成后台任务已提交；未检测任何真实节点。", startedAt: stamp, finishedAt: failed ? stamp : null, error: openAiError };
+      }
+      const details = profileDetails(profile.id);
+      subscriptionImportResult = { profile: structuredClone(profile), revision: structuredClone(details.revisions[0]), summary: structuredClone(summary), updated: created, created, activated, openAiGeneration, openAiError, observationError: null };
+      return structuredClone(subscriptionImportResult);
+    } finally {
+      subscriptionImportBusy = false;
+      reportSubscriptions();
+    }
+  }
   if (runtimeScenarioEnabled && ["set_network_mode", "start_active_profile", "stop_mihomo", "prepare_tun_active_profile"].includes(command)) {
     const requestedMode = args.mode as NetworkMode;
     fixtureRuntimeCalls.push({ command, ...(command === "set_network_mode" ? { mode: requestedMode } : command === "start_active_profile" ? { mode: fixtureRuntimeMode } : {}) });

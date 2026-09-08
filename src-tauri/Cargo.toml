@@ -1,6 +1,6 @@
 [package]
 name = "routedeck"
-version = "0.7.5"
+version = "0.7.6"
 license = "GPL-3.0-only"
 description = "Serylane (formerly RouteDeck): lightweight cross-platform Mihomo desktop client"
 authors = ["cmmuu"]
