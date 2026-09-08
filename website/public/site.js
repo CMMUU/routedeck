@@ -30,17 +30,17 @@
     macos: { name: "macOS", short: "macOS", icon: "apple", format: "DMG", defaultArchitecture: "arm64" },
     linux: { name: "Linux · AppImage", short: "Linux", icon: "linux", format: "AppImage", defaultArchitecture: "x64" },
   };
-  // Verified release snapshot, 2026-09-08 04:04 UTC. All six GitHub main packages
-  // exist; the three ARM64 main packages returned HTTP 200 on Gitee with matching size.
+  // Verified release snapshot, 2026-09-08 06:04 UTC. All six GitHub main packages
+  // returned HTTP 200 with matching size; all six Gitee main packages returned 404.
   // A source version or tag must never be used as evidence of a released file.
   const release = {
-    version: "v0.7.5",
+    version: "v0.7.6",
     files: {
-      windows: { x64: "RouteDeck_0.7.5_x64-setup.exe", arm64: "RouteDeck_0.7.5_arm64-setup.exe" },
-      macos: { x64: "RouteDeck_0.7.5_x64.dmg", arm64: "RouteDeck_0.7.5_aarch64.dmg" },
-      linux: { x64: "RouteDeck_0.7.5_amd64.AppImage", arm64: "RouteDeck_0.7.5_aarch64.AppImage" },
+      windows: { x64: "RouteDeck_0.7.6_x64-setup.exe", arm64: "RouteDeck_0.7.6_arm64-setup.exe" },
+      macos: { x64: "RouteDeck_0.7.6_x64.dmg", arm64: "RouteDeck_0.7.6_aarch64.dmg" },
+      linux: { x64: "RouteDeck_0.7.6_amd64.AppImage", arm64: "RouteDeck_0.7.6_aarch64.AppImage" },
     },
-    domesticAvailable: new Set(["windows:arm64", "macos:arm64", "linux:arm64"]),
+    domesticAvailable: new Set([]),
   };
   let selectedSystem = "windows";
   let selectedArchitecture = "x64";

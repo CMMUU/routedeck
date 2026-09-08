@@ -6,6 +6,8 @@
 
 首次上线版本 ID：`3fdb1fbf-ace8-43dc-8fec-5e9aa1c96c4b`。先上传未绑定域名的新 Worker，再核对域名变更预检只包含该 hostname 的一个新增项、无更新/移除/冲突，最后以三个覆盖开关均为 `false` 绑定域名。回读确认指向 `serylane-website`，未替换已有 DNS 或其他网站。域名绑定会新增 Cloudflare 管理的 DNS 与证书。
 
+v0.7.6 官网更新已于 **2026-09-08** 上线，版本 ID：`ab83f410-fa93-422a-9394-dfff107e4707`，100% 流量；通过版本上传／部署完成，未重建或覆盖域名与 DNS。线上主页、`site.js`、`/docs/` 实际 GET 成功，v0.7.6 下载链接、国内缺失回退与唯一订阅路径均已核对；静态与下载交互离线检查通过。线上 IAB 复核连续超时，不将其记录为本次视觉验收通过。
+
 ## 本地检查
 
 需要 Node.js 24、pnpm 11.19.0。
@@ -39,22 +41,24 @@ pnpm deploy:check
 
 CI 仅检查，不存储 Cloudflare 凭据，也不会自动登录或部署。不得在缺少授权时把 `deploy --dry-run` 当成上线成功。
 
+对于已经绑定正确域名的官网，更新静态资源优先使用 `wrangler versions upload --keep-vars`，再将返回的准确版本 ID 以 `wrangler versions deploy <VERSION_ID>@100` 上线；先执行 `versions upload --dry-run`。已核对 Wrangler 4.129.0：该路径不运行域名／路由触发器部署，不需要再次绑定域名。不要使用 `triggers deploy` 或覆盖选项来发布普通页面更新。新部署后再次核对公共页面和下载链接，记录版本 ID 以便回滚。
+
 ## 下载快照与更新
 
-当前固定为 **2026-09-08 核验的 v0.7.5**。GitHub 已正式发布，六个主包均返回 HEAD 200，Content-Length 与 Release API 的资产大小一致。国内镜像仍在同步；截至 **2026-09-08 12:04（UTC+8）** 的精确链接检查，Windows ARM64 EXE、macOS Apple Silicon DMG 与 Linux ARM64 AppImage 返回 HEAD 200 且大小与 GitHub 一致，其余三个 x64 主包返回 404，不能宣称国内镜像齐全。这是下载可用性与元数据核验，不代表在本次检查中下载大包执行了独立哈希校验。
+当前源码下载快照为 **2026-09-08 核验的 v0.7.6**。GitHub Release `384478083` 已于 14:01（UTC+8）正式发布，30 附件齐全；六个主包均返回 HEAD 200，Content-Length 与 Release API 的资产大小一致。国内镜像尚未就绪：截至 **2026-09-08 14:04（UTC+8）**，精确标签 API 返回 HTTP 200 但正文为 `null`，六个主包均返回 404、无有效 Content-Length。不能宣称国内镜像可用。这是下载可用性与元数据核验，不代表在本次检查中下载大包执行了独立哈希校验。
 
 | 主包文件名 | GitHub 大小（字节） | 本次 Gitee HEAD |
 | --- | ---: | --- |
-| `RouteDeck_0.7.5_x64-setup.exe` | 17,908,356 | 404，未就绪 |
-| `RouteDeck_0.7.5_arm64-setup.exe` | 15,140,650 | 200，大小一致 |
-| `RouteDeck_0.7.5_x64.dmg` | 27,482,395 | 404，未就绪 |
-| `RouteDeck_0.7.5_aarch64.dmg` | 25,154,497 | 200，大小一致 |
-| `RouteDeck_0.7.5_amd64.AppImage` | 100,559,352 | 404，未就绪 |
-| `RouteDeck_0.7.5_aarch64.AppImage` | 97,098,248 | 200，大小一致 |
+| `RouteDeck_0.7.6_x64-setup.exe` | 17,894,254 | 404，未就绪 |
+| `RouteDeck_0.7.6_arm64-setup.exe` | 15,146,861 | 404，未就绪 |
+| `RouteDeck_0.7.6_x64.dmg` | 27,512,923 | 404，未就绪 |
+| `RouteDeck_0.7.6_aarch64.dmg` | 25,177,200 | 404，未就绪 |
+| `RouteDeck_0.7.6_amd64.AppImage` | 100,563,448 | 404，未就绪 |
+| `RouteDeck_0.7.6_aarch64.AppImage` | 97,114,632 | 404，未就绪 |
 
 有同版本、同架构、同格式的国内主包时，将国内直链置为主要操作；其余情况明确提示缺失，主要操作改为已核验 GitHub 包。不会静默换成另一个版本或格式。
 
-当前三个 ARM64 主包为国内主操作、GitHub 备用；其余选项主操作为 GitHub，并明确提示当前所选国内包暂缺、保留国内发布页入口。无 JavaScript 时保留已核验的 Windows x64 GitHub EXE 直链，禁用无法工作的系统与架构选择器。这里是人工核验快照，不会自动探测镜像后续上传进度；更新国内可用集合前仍须复核具体链接。离线测试另外在 VM 内模拟国内包全部缺失或仅部分可用，持续验证格式提示、GitHub 回退和主操作 DOM 顺序，不向生产代码增加测试接口。
+当前六个主包均以 GitHub 为主操作，并明确提示当前所选国内包暂缺、保留国内发布页入口。无 JavaScript 时保留已核验的 Windows x64 GitHub EXE 直链，禁用无法工作的系统与架构选择器。这里是人工核验快照，不会自动探测镜像后续上传进度；更新国内可用集合前仍须复核具体链接。离线测试另外在 VM 内模拟国内包全部缺失或仅部分可用，持续验证格式提示、GitHub 回退和主操作 DOM 顺序，不向生产代码增加测试接口。
 
 新版本发布后，必须先核对 GitHub Release、Gitee API、具体文件的 HEAD 状态及大小，再同步修改 `public/site.js` 的 release 快照、首页无 JavaScript 降级链接/版本文字和 `scripts/test-downloads.mjs` 的独立预期值。未发布的源码版本、标签或存在的签名文件，不是包已存在的证据。国内链接不齐时不谎报镜像成功。
 
