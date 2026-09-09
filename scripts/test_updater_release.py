@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from updater_release import stage_updaters, updater_names
+from updater_release import stage_updaters, updater_names, UPDATER_MANIFESTS
 
 
 class UpdaterReleaseTests(unittest.TestCase):
@@ -43,6 +43,8 @@ class UpdaterReleaseTests(unittest.TestCase):
         github = json.loads((self.output / "latest.json").read_text())
         gitee = json.loads((self.output / "latest-gitee.json").read_text())
         self.assertEqual(github["version"], gitee["version"])
+        self.assertFalse((self.output / "latest-serylane.json").exists(),
+                         "Historical releases must not gain new manifest assets")
         self.assertEqual(len(github["platforms"]), 10)
         for target, data in github["platforms"].items():
             mirror = gitee["platforms"][target]
@@ -83,6 +85,11 @@ class UpdaterReleaseTests(unittest.TestCase):
                 asset.rename(asset.with_name(asset.name.replace("RouteDeck", "Serylane", 1)))
         self.prepare()
         manifest = json.loads((self.output / "latest.json").read_text())
+        self.assertTrue(all((self.output / name).is_file() for name in UPDATER_MANIFESTS))
+        github = json.loads((self.output / "latest-serylane.json").read_text())
+        gitee = json.loads((self.output / "latest-serylane-gitee.json").read_text())
+        legacy_gitee = json.loads((self.output / "latest-gitee.json").read_text())
+        self.assertEqual(set(github["platforms"]), set(manifest["platforms"]))
         for target, data in manifest["platforms"].items():
             legacy = data["url"].rsplit("/", 1)[-1]
             public = legacy.replace("RouteDeck", "Serylane", 1)
@@ -94,3 +101,14 @@ class UpdaterReleaseTests(unittest.TestCase):
                 public_bytes = (self.output / public).read_bytes()
             self.assertEqual((self.output / legacy).read_bytes(), public_bytes)
             self.assertEqual((self.output / (legacy + ".sig")).read_bytes(), (self.output / (public + ".sig")).read_bytes())
+            self.assertTrue(data["url"].startswith("https://github.com/CMMUU/routedeck/"))
+            self.assertTrue(legacy_gitee["platforms"][target]["url"].endswith("/" + legacy))
+            self.assertEqual(github["platforms"][target]["url"],
+                             f"https://github.com/CMMUU/serylane/releases/download/v0.7.0/{public}")
+            self.assertEqual(gitee["platforms"][target]["url"],
+                             f"https://gitee.com/cmmuu/routedeck/releases/download/v0.7.0/{public}")
+            for current in (github, gitee):
+                self.assertEqual(current["version"], manifest["version"])
+                for key in ("sha256", "size", "signature"):
+                    self.assertEqual(current["platforms"][target][key], data[key])
+            self.assertTrue((self.output / public).is_file(), "Every current URL names a staged package")

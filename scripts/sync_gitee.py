@@ -19,6 +19,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin, urlsplit
 from urllib.request import Request, HTTPRedirectHandler, build_opener
 import uuid
+from updater_release import UPDATER_MANIFESTS
 
 # Destination slug stays stable for already-installed updater clients.
 SOURCE_REPOS = {"routedeck": "serylane"}
@@ -622,7 +623,7 @@ class Sync:
         if (target.get("id"), target.get("tag_name"), target.get("prerelease")) != (
                 group["target"]["id"], group["source"]["tag_name"], False):
             raise SyncError("Destination release changed before cleanup")
-        for item in sorted(group["assets"], key=lambda row: (row["target"]["name"] not in {"latest.json", "latest-gitee.json"}, row["target"]["name"])):
+        for item in sorted(group["assets"], key=lambda row: (row["target"]["name"] not in UPDATER_MANIFESTS, row["target"]["name"])):
             asset = item["target"]
             if not re.fullmatch(r"[0-9a-f]{64}", item.get("sha256", "")):
                 raise SyncError("No verified byte-identical GitHub backup; refusing deletion")
@@ -745,7 +746,7 @@ class Sync:
         print(f"Verified Gitee attachment: {item['name']}", flush=True)
 
     def transfer_attachments(self, release_id, files):
-        manifests = {"latest.json", "latest-gitee.json"}
+        manifests = UPDATER_MANIFESTS
         regular = sorted((item for item in files if item["name"] not in manifests), key=lambda item: item["name"])
         if self.transfer_workers == 1:
             for item in regular:
@@ -772,7 +773,7 @@ class Sync:
                         raise
                     pending.update(pool.submit(transfer, item) for item in islice(pending_files, len(finished)))
         # This barrier is intentionally outside the pool: every installer,
-        # signature and checksum must verify before either updater manifest.
+        # signature and checksum must verify before any current/legacy manifest.
         for item in sorted((item for item in files if item["name"] in manifests), key=lambda item: item["name"]):
             self.ensure_attachment(release_id, item)
 

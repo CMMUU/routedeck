@@ -9,6 +9,18 @@ import shutil
 import subprocess
 
 
+LEGACY_CHANNELS = (
+    ("latest.json", "https://github.com/CMMUU/routedeck"),
+    ("latest-gitee.json", "https://gitee.com/cmmuu/routedeck"),
+)
+SERYLANE_CHANNELS = (
+    ("latest-serylane.json", "https://github.com/CMMUU/serylane"),
+    # Gitee display name is Serylane; the actual URL remains updater-compatible.
+    ("latest-serylane-gitee.json", "https://gitee.com/cmmuu/routedeck"),
+)
+UPDATER_MANIFESTS = frozenset(name for name, _ in (*LEGACY_CHANNELS, *SERYLANE_CHANNELS))
+
+
 def updater_names(version, product_name="RouteDeck"):
     prefix = f"RouteDeck_{version}"
     source_prefix = f"{product_name}_{version}"
@@ -87,25 +99,31 @@ def stage_updaters(root, artifacts, output, version, notes, verify=verify_signat
             verify(root, msi, msi_signature)
             # The public MSI is in the installer set; legacy updater names are
             # strict compatibility aliases of the same signed bytes.
-            if (output / msi_name).exists() and (output / msi_name).read_bytes() != msi.read_bytes():
-                raise ValueError("MSI alias conflicts with installer")
-            shutil.copyfile(msi, output / msi_name)
-            shutil.copyfile(msi_signature, output / (msi_name + ".sig"))
-            if msi_source_name != msi_name:
-                shutil.copyfile(msi_signature, output / (msi_source_name + ".sig"))
-                staged.append(output / (msi_source_name + ".sig"))
+            for destination_name in dict.fromkeys((msi_name, msi_source_name)):
+                for source, name_to_copy in ((msi, destination_name), (msi_signature, destination_name + ".sig")):
+                    destination = output / name_to_copy
+                    if destination.exists() and destination.read_bytes() != source.read_bytes():
+                        raise ValueError("MSI alias conflicts with installer")
+                    if not destination.exists():
+                        shutil.copyfile(source, destination)
+                    staged.append(destination)
             with msi.open("rb") as stream:
                 digest = hashlib.file_digest(stream, "sha256").hexdigest()
             platforms[target + "-msi"] = {"name": msi_name, "signature": msi_signature.read_text(encoding="utf-8").strip(), "size": msi.stat().st_size, "sha256": digest}
-            staged.extend([output / msi_name, output / (msi_name + ".sig")])
     # Do not rewrite these URLs to the new repository slug: <= 0.7.6 clients
     # validate the exact legacy URL. GitHub redirects it to CMMUU/serylane.
     # The public installers and links use Serylane; these are signed-byte aliases.
-    for manifest_name, base in [("latest.json", "https://github.com/CMMUU/routedeck"), ("latest-gitee.json", "https://gitee.com/cmmuu/routedeck")]:
+    channels = [(name, base, False) for name, base in LEGACY_CHANNELS]
+    if product_name == "Serylane":
+        channels.extend((name, base, True) for name, base in SERYLANE_CHANNELS)
+    for manifest_name, base, current_brand in channels:
         manifest = {"version": version, "notes": notes, "pub_date": published_at, "platforms": {}}
         for target, data in platforms.items():
             manifest["platforms"][target] = {key: value for key, value in data.items() if key != "name"}
-            manifest["platforms"][target]["url"] = f"{base}/releases/download/v{version}/{data['name']}"
+            name = data["name"].replace("RouteDeck_", "Serylane_", 1) if current_brand else data["name"]
+            if not (output / name).is_file():
+                raise ValueError(f"Manifest asset was not staged: {name}")
+            manifest["platforms"][target]["url"] = f"{base}/releases/download/v{version}/{name}"
         path = output / manifest_name
         path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8", newline="\n")
         staged.append(path)
