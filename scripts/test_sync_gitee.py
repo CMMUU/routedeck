@@ -17,7 +17,7 @@ HERE = Path(__file__).resolve().parent
 
 
 def metadata(private=False, owner="cmmuu", repo=None):
-    repo = repo or ("serylane" if owner == "CMMUU" else "routedeck")
+    repo = repo or "serylane"
     return {"full_name": f"{owner}/{repo}", "owner": {"login": owner}, "private": private,
             "path": repo, "html_url": f"https://gitee.com/{owner}/{repo}"}
 
@@ -67,14 +67,14 @@ class SyncTests(unittest.TestCase):
         return Path(temp.name)
 
     def test_repository_scope_is_exactly_the_renamed_project(self):
-        self.assertEqual(sync.REPOS, {"routedeck"})
-        self.assertEqual(sync.SOURCE_REPOS, {"routedeck": "serylane"})
-        job = sync.Sync("routedeck", None, None, self.fixture())
+        self.assertEqual(sync.REPOS, {"serylane"})
+        self.assertEqual(sync.SOURCE_REPOS, {"serylane": "serylane"})
+        job = sync.Sync("serylane", None, None, self.fixture())
         self.assertEqual(job.source_path, "/repos/CMMUU/serylane")
-        self.assertEqual(job.target_path, "/repos/cmmuu/routedeck")
+        self.assertEqual(job.target_path, "/repos/cmmuu/serylane")
         with self.assertRaisesRegex(sync.SyncError, "GitHub source"):
-            sync.validate_pair("routedeck", metadata(False, "CMMUU", "routedeck"), metadata())
-        for repo in ("mihomo-codex", "RouteDeck", "other", "../routedeck"):
+            sync.validate_pair("serylane", metadata(False, "CMMUU", "routedeck"), metadata())
+        for repo in ("routedeck", "mihomo-codex", "RouteDeck", "other", "../serylane"):
             with self.subTest(repo=repo), self.assertRaisesRegex(sync.SyncError, "Unsupported repository"):
                 sync.Sync(repo, None, None, self.fixture())
 
@@ -82,7 +82,7 @@ class SyncTests(unittest.TestCase):
         failed = SimpleNamespace(returncode=128, stdout="", stderr="TLS connection reset secret-token")
         success = SimpleNamespace(returncode=0, stdout="verified refs\n", stderr="")
         with patch.object(sync.subprocess, "run", side_effect=[failed, success]) as run, patch.object(sync.time, "sleep"):
-            self.assertEqual(sync.git_run("routedeck", "ls-remote", "https://gitee.com/cmmuu/routedeck.git"), "verified refs")
+            self.assertEqual(sync.git_run("serylane", "ls-remote", "https://gitee.com/cmmuu/serylane.git"), "verified refs")
             self.assertEqual(run.call_count, 2)
             self.assertIn("http.version=HTTP/1.1", run.call_args.args[0])
 
@@ -92,16 +92,16 @@ class SyncTests(unittest.TestCase):
         def request(path, method="GET", data=None):
             if path == "/user":
                 return {"login": "cmmuu"}
-            self.assertEqual(path, "/repos/cmmuu/routedeck")
+            self.assertEqual(path, "/repos/cmmuu/serylane")
             if method == "PATCH":
                 writes.append(data.copy())
                 target.update(data)
             return target.copy()
-        job = sync.Sync("routedeck", SimpleNamespace(request=lambda path: metadata(owner="CMMUU")),
+        job = sync.Sync("serylane", SimpleNamespace(request=lambda path: metadata(owner="CMMUU")),
                         SimpleNamespace(request=request), self.fixture())
         job.sync_display_name()
         self.assertEqual(writes, [{"name": "Serylane"}])
-        self.assertEqual(target["path"], "routedeck")
+        self.assertEqual(target["path"], "serylane")
         job.sync_display_name()
         self.assertEqual(len(writes), 1)
 
@@ -109,14 +109,14 @@ class SyncTests(unittest.TestCase):
         for target in ({**metadata(), "name": "RouteDeck"},
                        {**metadata(), "id": 50078322, "name": "RouteDeck"}):
             ge = SimpleNamespace(request=lambda *args: {})
-            job = sync.Sync("routedeck", None, ge, self.fixture())
+            job = sync.Sync("serylane", None, ge, self.fixture())
             with patch.object(job, "guard", return_value=target), patch.object(ge, "request") as request:
                 with self.assertRaises(sync.SyncError):
                     job.sync_display_name()
                 self.assertEqual(request.call_count, 1 if target.get("id") else 0)
 
     def test_display_name_preview_performs_no_writes(self):
-        job = sync.Sync("routedeck", None, None, self.fixture())
+        job = sync.Sync("serylane", None, None, self.fixture())
         with patch.object(job, "guard"), patch.object(job, "sync_display_name") as rename, patch.object(job, "sync_refs") as refs:
             job.run("refs", False, sync_display_name=True)
             rename.assert_not_called()
@@ -125,7 +125,7 @@ class SyncTests(unittest.TestCase):
     def test_all_current_and_legacy_manifests_wait_for_verified_packages(self):
         for workers in (1, 3):
             with self.subTest(workers=workers):
-                job = sync.Sync("routedeck", SimpleNamespace(fork=lambda: None),
+                job = sync.Sync("serylane", SimpleNamespace(fork=lambda: None),
                                 SimpleNamespace(fork=lambda: None), self.fixture(),
                                 transfer_workers=workers)
                 names = [*sorted(sync.UPDATER_MANIFESTS), "Serylane_0.7.7_x64-setup.exe",
@@ -154,7 +154,7 @@ class SyncTests(unittest.TestCase):
                                              ("ls-remote", "Authentication failed secret-token", "authorization")):
             with self.subTest(operation=operation), patch.object(sync.subprocess, "run", return_value=SimpleNamespace(returncode=128, stdout="", stderr=stderr)) as run, patch.object(sync.time, "sleep") as sleep:
                 with self.assertRaises(sync.SyncError) as raised:
-                    sync.git_run("routedeck", "--git-dir", "mirror.git", operation)
+                    sync.git_run("serylane", "--git-dir", "mirror.git", operation)
                 self.assertIn(f"Git {operation} failed ({expected})", str(raised.exception))
                 self.assertNotIn("secret-token", str(raised.exception))
                 self.assertEqual(run.call_count, 1)
@@ -163,12 +163,12 @@ class SyncTests(unittest.TestCase):
     def test_uncertain_push_is_accepted_only_after_all_refs_match(self):
         for matches in (True, False):
             with self.subTest(matches=matches):
-                job = sync.Sync("routedeck", None, None, self.fixture())
+                job = sync.Sync("serylane", None, None, self.fixture())
                 refs = "refs/heads/main " + "a" * 40 + "\nrefs/tags/v0.7.0 " + "b" * 40
                 actual = "a" * 40 + "\trefs/heads/main\n" + ("b" if matches else "c") * 40 + "\trefs/tags/v0.7.0"
                 with patch.object(job, "guard"), patch.object(sync, "git_run", side_effect=["", sync.SyncError("Git push failed (transient network)"), refs, actual]) as run:
                     if matches:
-                        self.assertEqual(job.sync_refs(), job.work / "routedeck.git")
+                        self.assertEqual(job.sync_refs(), job.work / "serylane.git")
                     else:
                         with self.assertRaisesRegex(sync.SyncError, "Git push failed"):
                             job.sync_refs()
@@ -176,7 +176,7 @@ class SyncTests(unittest.TestCase):
 
     def test_focused_release_sync_keeps_full_capacity_checks(self):
         releases = [{"tag_name": "v0.7.1", "draft": False}, {"tag_name": "v0.5.0", "draft": False}]
-        job = sync.Sync("routedeck", SimpleNamespace(pages=lambda path: releases), None, self.fixture())
+        job = sync.Sync("serylane", SimpleNamespace(pages=lambda path: releases), None, self.fixture())
         with patch.object(job, "guard"), patch.object(job, "sync_refs", return_value="mirror") as refs, patch.object(job, "plan_release_capacity") as capacity, patch.object(job, "sync_release") as transfer:
             job.run("all", True, "v0.7.1")
             refs.assert_called_once()
@@ -186,7 +186,7 @@ class SyncTests(unittest.TestCase):
     def test_unknown_draft_or_ambiguous_focused_release_stops_before_writes(self):
         for releases in ([], [{"tag_name": "v0.7.1", "draft": True}], [{"tag_name": "v0.7.1", "draft": False}] * 2):
             with self.subTest(releases=releases):
-                job = sync.Sync("routedeck", SimpleNamespace(pages=lambda path: releases), None, self.fixture())
+                job = sync.Sync("serylane", SimpleNamespace(pages=lambda path: releases), None, self.fixture())
                 with patch.object(job, "guard"), patch.object(job, "sync_refs") as refs, patch.object(job, "sync_release") as transfer:
                     with self.assertRaisesRegex(sync.SyncError, "not uniquely published"):
                         job.run("all", True, "v0.7.1")
@@ -194,7 +194,7 @@ class SyncTests(unittest.TestCase):
                     transfer.assert_not_called()
 
     def test_focused_sync_rejects_invalid_tags_and_refs_only_scope(self):
-        job = sync.Sync("routedeck", None, None, self.fixture())
+        job = sync.Sync("serylane", None, None, self.fixture())
         for scope, tag in (("refs", "v0.7.1"), ("all", "main"), ("all", "v0.7.1-beta"), ("all", "v0.7.1/other"), ("all", "v00.7.1")):
             with self.subTest(scope=scope, tag=tag), patch.object(job, "guard") as guard:
                 with self.assertRaisesRegex(sync.SyncError, "exact stable release tag"):
@@ -202,12 +202,12 @@ class SyncTests(unittest.TestCase):
                 guard.assert_not_called()
 
     def test_git_credentials_only_allow_the_renamed_repository_paths(self):
-        environment = {"SYNC_REPO": "routedeck", "GITHUB_TOKEN": "offline-gh", "GITEE_TOKEN": "offline-ge"}
+        environment = {"SYNC_REPO": "serylane", "GITHUB_TOKEN": "offline-gh", "GITEE_TOKEN": "offline-ge"}
         for host, owner, username, token in (("github.com", "CMMUU", "x-access-token", "offline-gh"),
                                              ("gitee.com", "cmmuu", "cmmuu", "offline-ge")):
-            allowed = f"{owner}/{'serylane' if host == 'github.com' else 'routedeck'}.git"
+            allowed = f"{owner}/serylane.git"
             for path in (allowed, f"{owner}/routedeck.git", f"{owner}/mihomo-codex.git", f"{owner}/other.git",
-                         "other/routedeck.git", f"{owner}/routedeck.git/other"):
+                         "other/serylane.git", f"{owner}/serylane.git/other"):
                 with self.subTest(host=host, path=path):
                     output = StringIO()
                     fields = StringIO(f"protocol=https\nhost={host}\npath={path}\n\n")
@@ -225,7 +225,7 @@ class SyncTests(unittest.TestCase):
         class GE:
             def request(self, path):
                 return metadata(False)
-        job = sync.Sync("routedeck", GH(), GE(), self.fixture())
+        job = sync.Sync("serylane", GH(), GE(), self.fixture())
         with patch.object(sync, "git_run") as git:
             with self.assertRaisesRegex(sync.SyncError, "Private GitHub"):
                 job.sync_refs()
@@ -236,21 +236,21 @@ class SyncTests(unittest.TestCase):
         for target in (metadata(True, "other"), metadata(True, repo="other"), metadata("false")):
             with self.subTest(target=target):
                 with self.assertRaises(sync.SyncError):
-                    sync.validate_pair("routedeck", source, target)
-        sync.validate_pair("routedeck", source, metadata(True))
+                    sync.validate_pair("serylane", source, target)
+        sync.validate_pair("serylane", source, metadata(True))
 
     def test_gitee_repository_url_accepts_only_exact_web_or_clone_url(self):
         source = metadata(False, "CMMUU")
-        base = "https://gitee.com/cmmuu/routedeck"
+        base = "https://gitee.com/cmmuu/serylane"
         for url in (base, base + ".git"):
             with self.subTest(url=url):
-                sync.validate_pair("routedeck", source, {**metadata(), "html_url": url})
+                sync.validate_pair("serylane", source, {**metadata(), "html_url": url})
         for url in (base + ".git.attacker", base + ".git/other", base + "/", base + "?other=repo",
-                    "https://gitee.com/cmmuu/other", "https://gitee.com/other/routedeck",
-                    "https://gitee.com.attacker/cmmuu/routedeck", base.replace("https:", "http:")):
+                    "https://gitee.com/cmmuu/other", "https://gitee.com/other/serylane",
+                    "https://gitee.com.attacker/cmmuu/serylane", base.replace("https:", "http:")):
             with self.subTest(url=url):
                 with self.assertRaisesRegex(sync.SyncError, "target path"):
-                    sync.validate_pair("routedeck", source, {**metadata(), "html_url": url})
+                    sync.validate_pair("serylane", source, {**metadata(), "html_url": url})
 
     def test_public_repository_does_not_bypass_authenticated_owner_preflight(self):
         class GH:
@@ -263,9 +263,9 @@ class SyncTests(unittest.TestCase):
                     if isinstance(self.identity, Exception):
                         raise self.identity
                     return self.identity
-                return metadata(False, repo="routedeck")
+                return metadata(False, repo="serylane")
         ge = GE()
-        job = sync.Sync("routedeck", GH(), ge, self.fixture())
+        job = sync.Sync("serylane", GH(), ge, self.fixture())
         with patch.object(sync, "git_run") as git:
             for identity in ({}, {"login": "other-owner"}, sync.SyncError("Bearer rejected")):
                 ge.identity = identity
@@ -273,7 +273,7 @@ class SyncTests(unittest.TestCase):
                     job.sync_refs()
             git.assert_not_called()
         ge.identity = {"login": "CMMUU"}
-        self.assertEqual(job.guard()["path"], "routedeck")
+        self.assertEqual(job.guard()["path"], "serylane")
 
     def test_redirect_never_forwards_auth_and_unknown_host_is_rejected(self):
         data = b"verified package"
@@ -337,7 +337,7 @@ class SyncTests(unittest.TestCase):
         source = root / "package.zip"
         source.write_bytes(b"good")
         ge = GiteeFixture(existing, copies)
-        job = sync.Sync("routedeck", None, ge, root)
+        job = sync.Sync("serylane", None, ge, root)
         job.guard = lambda: None
         item = {"path": source, "name": source.name, "size": 4, "sha256": hashlib.sha256(b"good").hexdigest()}
         return job, ge, item
@@ -416,7 +416,7 @@ class SyncTests(unittest.TestCase):
                 if path.endswith("/releases"):
                     return [{"id": 12, "tag_name": "v1"}] if existing else []
                 return list(existing)
-        job = sync.Sync("routedeck", GH(), GE(), self.fixture(), max_asset, max_total, reserved)
+        job = sync.Sync("serylane", GH(), GE(), self.fixture(), max_asset, max_total, reserved)
         job.guard = lambda: None
         return job, release
 
@@ -459,7 +459,7 @@ class SyncTests(unittest.TestCase):
     def test_privacy_recheck_blocks_upload_when_visibility_changes(self):
         job, ge, item = self.attachment_job()
         def changed():
-            sync.validate_pair("routedeck", metadata(True, "CMMUU"), metadata(False))
+            sync.validate_pair("serylane", metadata(True, "CMMUU"), metadata(False))
         job.guard = changed
         with self.assertRaisesRegex(sync.SyncError, "Private GitHub"):
             job.ensure_attachment(1, item)
@@ -485,7 +485,7 @@ class SyncTests(unittest.TestCase):
         self.assertEqual(api.opener.requests, [])
 
     def test_ref_sync_copies_all_heads_and_tags_without_force_or_remote_deletion(self):
-        job = sync.Sync("routedeck", None, None, self.fixture())
+        job = sync.Sync("serylane", None, None, self.fixture())
         job.guard = lambda: None
         calls = []
         refs = {"refs/heads/main": "a" * 40, "refs/heads/topic": "b" * 40, "refs/tags/v0.4.0": "c" * 40}
@@ -541,7 +541,7 @@ class SyncTests(unittest.TestCase):
                     return [self.release] if self.release else []
                 return super().pages(path)
         ge = GE()
-        job = sync.Sync("routedeck", GH(), ge, self.fixture())
+        job = sync.Sync("serylane", GH(), ge, self.fixture())
         release = {"id": 1, "tag_name": "v0.4.0", "name": "准确标题", "body": "原正文\n第二行", "prerelease": False, "draft": False}
         with patch.object(sync, "git_run", return_value="a" * 40), patch("builtins.print"):
             job.sync_release(release, job.work / "fixture.git")
@@ -569,7 +569,7 @@ class SyncTests(unittest.TestCase):
                 result["body"] = (read_back_body if read_back_body is not None else result["body"]).replace("\r\n", "\n").replace("\n", "\r\n")
                 return result
         ge = GE()
-        job = sync.Sync("routedeck", None, ge, self.fixture())
+        job = sync.Sync("serylane", None, ge, self.fixture())
         job.guard = lambda: None
         job.source_assets = lambda release: []
         return job, ge, source

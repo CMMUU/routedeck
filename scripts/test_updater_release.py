@@ -106,7 +106,7 @@ class UpdaterReleaseTests(unittest.TestCase):
             self.assertEqual(github["platforms"][target]["url"],
                              f"https://github.com/CMMUU/serylane/releases/download/v0.7.0/{public}")
             self.assertEqual(gitee["platforms"][target]["url"],
-                             f"https://gitee.com/cmmuu/routedeck/releases/download/v0.7.0/{public}")
+                             f"https://gitee.com/cmmuu/serylane/releases/download/v0.7.0/{public}")
             for current in (github, gitee):
                 self.assertEqual(current["version"], manifest["version"])
                 for key in ("sha256", "size", "signature"):

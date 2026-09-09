@@ -9,8 +9,8 @@ const script = await readFile(new URL('../public/site.js', import.meta.url), 'ut
 // offline: changing the release requires checking the remote assets again.
 const version = 'v0.7.6';
 const githubBase = `https://github.com/CMMUU/serylane/releases/download/${version}/`;
-const giteeBase = `https://gitee.com/cmmuu/routedeck/releases/download/${version}/`;
-const giteeRelease = `https://gitee.com/cmmuu/routedeck/releases/tag/${version}`;
+const giteeBase = `https://gitee.com/cmmuu/serylane/releases/download/${version}/`;
+const giteeRelease = `https://gitee.com/cmmuu/serylane/releases/tag/${version}`;
 const downloads = [
   { system: 'windows', architecture: 'x64', short: 'Windows', name: 'Windows 10 / 11', icon: 'windows', format: 'EXE', filename: 'RouteDeck_0.7.6_x64-setup.exe', domestic: false },
   { system: 'windows', architecture: 'arm64', short: 'Windows', name: 'Windows 10 / 11', icon: 'windows', format: 'EXE', filename: 'RouteDeck_0.7.6_arm64-setup.exe', domestic: false },

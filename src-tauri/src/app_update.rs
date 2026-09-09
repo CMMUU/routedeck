@@ -20,7 +20,8 @@ const LEGACY_GITHUB_MANIFEST: &str =
 // Published <= 0.7.6 clients require this exact URL in latest.json. Keep the
 // signed compatibility alias while all visible release links use Serylane.
 const LEGACY_GITHUB_RELEASES: &str = "https://github.com/CMMUU/routedeck/releases";
-const GITEE_RELEASE: &str = "https://gitee.com/api/v5/repos/cmmuu/routedeck/releases/latest";
+const LEGACY_GITEE_RELEASES: &str = "https://gitee.com/cmmuu/routedeck/releases";
+const GITEE_RELEASE: &str = "https://gitee.com/api/v5/repos/cmmuu/serylane/releases/latest";
 const MAX_METADATA_BYTES: usize = 512 * 1024;
 const MAX_DOWNLOAD_BYTES: u64 = 256 * 1024 * 1024;
 
@@ -44,7 +45,7 @@ impl UpdateSource {
     fn release_base(self) -> AppResult<&'static str> {
         match self {
             Self::Github => Ok("https://github.com/CMMUU/serylane/releases"),
-            Self::Gitee => Ok("https://gitee.com/cmmuu/routedeck/releases"),
+            Self::Gitee => Ok("https://gitee.com/cmmuu/serylane/releases"),
             Self::Auto => Err(failure("请指定实际发布渠道")),
         }
     }
@@ -237,7 +238,14 @@ fn validate_asset(
         source.release_base()?,
         legacy_artifact_name(target, version)?
     );
-    if url.as_str() != expected && url.as_str() != legacy_channel && !legacy_github {
+    let legacy_gitee = matches!(source, UpdateSource::Gitee)
+        && url.as_str()
+            == format!(
+                "{LEGACY_GITEE_RELEASES}/download/v{version}/{}",
+                legacy_artifact_name(target, version)?
+            );
+    if url.as_str() != expected && url.as_str() != legacy_channel && !legacy_github && !legacy_gitee
+    {
         return Err(failure("更新包地址与官方渠道、版本或架构不一致"));
     }
     let platform = &raw["platforms"][target];
@@ -824,7 +832,7 @@ mod tests {
         );
         assert_eq!(
             official_release_url(UpdateSource::Gitee, "v1.2.3").unwrap(),
-            "https://gitee.com/cmmuu/routedeck/releases/tag/v1.2.3"
+            "https://gitee.com/cmmuu/serylane/releases/tag/v1.2.3"
         );
         assert!(official_release_url(UpdateSource::Auto, "v1.2.3").is_err());
         assert!(official_release_url(UpdateSource::Github, "v1.2.3?redirect=evil").is_err());
@@ -844,11 +852,11 @@ mod tests {
         assert_eq!(gitee.endpoints.len(), 2);
         assert_eq!(
             gitee.endpoints[0].as_str(),
-            "https://gitee.com/cmmuu/routedeck/releases/download/v0.7.7/latest-serylane-gitee.json"
+            "https://gitee.com/cmmuu/serylane/releases/download/v0.7.7/latest-serylane-gitee.json"
         );
         assert_eq!(
             gitee.endpoints[1].as_str(),
-            "https://gitee.com/cmmuu/routedeck/releases/download/v0.7.7/latest-gitee.json"
+            "https://gitee.com/cmmuu/serylane/releases/download/v0.7.7/latest-gitee.json"
         );
         assert!(manifest_location(UpdateSource::Auto, None).is_err());
         for tag in [
@@ -914,6 +922,34 @@ mod tests {
         }
     }
     #[test]
+    fn gitee_legacy_manifest_accepts_only_the_exact_old_asset_alias() {
+        let raw = serde_json::json!({ "platforms": { "windows-x86_64": { "sha256": "a".repeat(64), "size": 100 } } });
+        let legacy = "https://gitee.com/cmmuu/routedeck/releases/download/v0.7.6/RouteDeck_0.7.6_x64-setup.exe";
+        assert!(validate_asset(
+            UpdateSource::Gitee,
+            "windows-x86_64",
+            "0.7.6",
+            &Url::parse(legacy).unwrap(),
+            &raw
+        )
+        .is_ok());
+        for invalid in [
+            legacy.replace("cmmuu/", "other/"),
+            legacy.replace("RouteDeck_", "Serylane_"),
+            legacy.replace("v0.7.6/", "v0.7.7/"),
+        ] {
+            assert!(validate_asset(
+                UpdateSource::Gitee,
+                "windows-x86_64",
+                "0.7.6",
+                &Url::parse(&invalid).unwrap(),
+                &raw
+            )
+            .is_err());
+        }
+    }
+
+    #[test]
     fn github_rename_accepts_only_exact_current_and_legacy_update_assets() {
         let raw = serde_json::json!({ "platforms": { "windows-x86_64": { "sha256": "a".repeat(64), "size": 100 } } });
         for repo in ["serylane", "routedeck"] {
@@ -948,7 +984,7 @@ mod tests {
     #[test]
     fn asset_validation_binds_channel_version_arch_hash_and_size() {
         let raw = serde_json::json!({ "platforms": { "windows-x86_64": { "sha256": "a".repeat(64), "size": 100 } } });
-        let url = Url::parse("https://gitee.com/cmmuu/routedeck/releases/download/v1.2.3/RouteDeck_1.2.3_x64-setup.exe").unwrap();
+        let url = Url::parse("https://gitee.com/cmmuu/serylane/releases/download/v1.2.3/RouteDeck_1.2.3_x64-setup.exe").unwrap();
         assert!(validate_asset(UpdateSource::Gitee, "windows-x86_64", "1.2.3", &url, &raw).is_ok());
         assert!(
             validate_asset(UpdateSource::Github, "windows-x86_64", "1.2.3", &url, &raw).is_err()

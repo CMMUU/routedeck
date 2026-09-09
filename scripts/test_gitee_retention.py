@@ -12,7 +12,7 @@ import sync_gitee as sync
 
 
 def repo_metadata(owner):
-    repo = "serylane" if owner == "CMMUU" else "routedeck"
+    repo = "serylane"
     return {"full_name": f"{owner}/{repo}", "path": repo, "private": False,
             "owner": {"login": owner}, "html_url": f"https://gitee.com/{owner}/{repo}"}
 
@@ -73,14 +73,14 @@ class Destination:
     def pages(self, path):
         if path.endswith("/releases"):
             return deepcopy(list(self.releases.values()))
-        match = re.fullmatch(r"/repos/cmmuu/routedeck/releases/(\d+)/attach_files", path)
+        match = re.fullmatch(r"/repos/cmmuu/serylane/releases/(\d+)/attach_files", path)
         assert match, path
         return deepcopy(self.assets[int(match[1])])
 
     def request(self, path, method="GET", data=None):
         if path == "/user":
             return {"login": "cmmuu"}
-        if path == "/repos/cmmuu/routedeck":
+        if path == "/repos/cmmuu/serylane":
             return repo_metadata("cmmuu")
         if method == "POST" and path.endswith("/releases"):
             self.next_id += 1
@@ -88,7 +88,7 @@ class Destination:
             self.assets[self.next_id] = []
             self.events.append(("create", data["tag_name"]))
             return deepcopy(self.releases[self.next_id])
-        match = re.fullmatch(r"/repos/cmmuu/routedeck/releases/(\d+)(?:/attach_files/(\d+))?", path)
+        match = re.fullmatch(r"/repos/cmmuu/serylane/releases/(\d+)(?:/attach_files/(\d+))?", path)
         assert match, (path, method)
         release_id = int(match[1])
         if method == "GET":
@@ -135,7 +135,7 @@ class RetentionTests(unittest.TestCase):
             source = gh.add(tag)
             if tag != "v0.7.2":
                 ge.add(source, gh)
-        job = sync.Sync("routedeck", gh, ge, Path(temporary.name), max_total_bytes=limit, other_attachment_bytes=reserved)
+        job = sync.Sync("serylane", gh, ge, Path(temporary.name), max_total_bytes=limit, other_attachment_bytes=reserved)
         return job, gh, ge, events
 
     def run_job(self, job, apply=True, focused=None, keep=1):
@@ -327,10 +327,10 @@ class RetentionTests(unittest.TestCase):
                 return response
         opener = Opener()
         api.opener = opener
-        self.assertIsNone(api.request("/repos/cmmuu/routedeck/releases/12/attach_files/34", "DELETE"))
+        self.assertIsNone(api.request("/repos/cmmuu/serylane/releases/12/attach_files/34", "DELETE"))
         self.assertNotIn("offline-secret", opener.request.full_url)
-        for path in ("/repos/cmmuu/routedeck/releases/12", "/repos/cmmuu/routedeck/tags/v1.0.0",
-                     "/repos/other/routedeck/releases/12/attach_files/34", "/repos/cmmuu/routedeck/releases/0/attach_files/34"):
+        for path in ("/repos/cmmuu/serylane/releases/12", "/repos/cmmuu/serylane/tags/v1.0.0",
+                     "/repos/other/serylane/releases/12/attach_files/34", "/repos/cmmuu/serylane/releases/0/attach_files/34"):
             with self.assertRaisesRegex(sync.SyncError, "restricted"):
                 api.request(path, "DELETE")
 

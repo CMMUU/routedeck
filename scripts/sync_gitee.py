@@ -21,8 +21,9 @@ from urllib.request import Request, HTTPRedirectHandler, build_opener
 import uuid
 from updater_release import UPDATER_MANIFESTS
 
-# Destination slug stays stable for already-installed updater clients.
-SOURCE_REPOS = {"routedeck": "serylane"}
+# Both canonical repositories now use the product slug. Legacy migration below
+# is opt-in and bound to the original numeric repository identities.
+SOURCE_REPOS = {"serylane": "serylane"}
 REPOS = set(SOURCE_REPOS)
 GH_OWNER, GE_OWNER = "CMMUU", "cmmuu"
 GH_API, GE_API = "https://api.github.com", "https://gitee.com/api/v5"
@@ -42,6 +43,10 @@ class SyncError(Exception):
 
 
 class RetryableReadError(SyncError):
+    pass
+
+
+class NotFoundError(SyncError):
     pass
 
 
@@ -196,6 +201,8 @@ class Api:
                 return json.loads(raw)
         except HTTPError as error:
             # Never print response bodies, full URLs or signed query strings.
+            if method == "GET" and error.code == 404:
+                raise NotFoundError(f"{self.service} API returned HTTP 404") from None
             if method == "GET" and error.code in TRANSIENT_HTTP:
                 raise RetryableReadError(f"{self.service} API temporarily unavailable (HTTP {error.code})") from None
             raise SyncError(f"{self.service} API returned HTTP {error.code}; no write was retried") from None
@@ -399,6 +406,68 @@ def git_run(repo, *args):
         time.sleep(2 ** attempt)
 
 
+def migrate_legacy_path(github, gitee, apply=False):
+    """Rename only the approved original repository; never create or replace one."""
+    source = github.request("/repos/CMMUU/serylane")
+    if (source.get("id") != 1355770287 or source.get("full_name") != "CMMUU/serylane"
+            or source.get("private") is not False):
+        raise SyncError("GitHub migration source identity changed")
+    if str(gitee.request("/user").get("login", "")).casefold() != GE_OWNER:
+        raise SyncError("Gitee migration requires the approved owner")
+
+    def checked(info, slug):
+        if (type(info.get("id")) is not int or info["id"] != 50078322
+                or str(info.get("owner", {}).get("login", "")).casefold() != GE_OWNER
+                or info.get("path") != slug or info.get("private") is not False
+                or info.get("default_branch") != "main"):
+            raise SyncError("Gitee migration identity/path/visibility/default branch changed")
+        return info
+
+    new_path = "/repos/cmmuu/serylane"
+    old_path = "/repos/cmmuu/routedeck"
+    try:
+        current = gitee.request(new_path)
+    except NotFoundError:
+        current = None
+    if current is not None:
+        checked(current, "serylane")
+        if current.get("name") != "Serylane":
+            raise SyncError("Canonical Gitee repository has an unexpected display name")
+        print("Canonical Gitee path verified: cmmuu/serylane (original repository)", flush=True)
+        return True
+
+    previous = checked(gitee.request(old_path), "routedeck")
+    if not apply:
+        print("Preview: rename original Gitee repository cmmuu/routedeck to cmmuu/serylane")
+        return False
+    # Preserve documented API defaults when exposed by repository metadata.
+    fields = {"name": "Serylane", "path": "serylane"}
+    for key in ("has_issues", "has_wiki", "can_comment", "merge_enabled", "squash_enabled", "rebase_enabled"):
+        if type(previous.get(key)) is bool:
+            fields[key] = str(previous[key]).lower()
+    before_releases = {row["id"]: row["tag_name"] for row in gitee.pages(old_path + "/releases")}
+    before_head = gitee.request(old_path + "/branches/main")["commit"]["sha"]
+    write_error = None
+    try:
+        gitee.request(old_path, "PATCH", fields)
+    except SyncError as error:
+        # An uncertain write is never repeated. Verify the new path separately.
+        write_error = error
+    try:
+        confirmed = checked(gitee.request(new_path), "serylane")
+    except SyncError:
+        if write_error is not None:
+            raise write_error
+        raise
+    after_releases = {row["id"]: row["tag_name"] for row in gitee.pages(new_path + "/releases")}
+    after_head = gitee.request(new_path + "/branches/main")["commit"]["sha"]
+    if (confirmed.get("name") != "Serylane" or before_releases != after_releases or before_head != after_head
+            or any(confirmed.get(key) != previous[key] for key in fields if key not in {"name", "path"})):
+        raise SyncError("Gitee rename did not preserve the checked repository state")
+    print("Gitee renamed and verified: cmmuu/serylane; repository ID, main and releases preserved", flush=True)
+    return True
+
+
 class Sync:
     def __init__(self, repo, github, gitee, work, max_asset_bytes=GE_MAX_ASSET,
                  max_total_bytes=GE_MAX_TOTAL, other_attachment_bytes=0, transfer_workers=1):
@@ -459,8 +528,8 @@ class Sync:
         return bare
 
     def sync_display_name(self):
-        # Renaming the URL would strand installed clients. Only the visible
-        # name changes; owner/path/privacy and the repository ID must survive.
+        # Display-name maintenance never changes the canonical URL. Migration
+        # is a separate, explicitly authorized operation above.
         target = self.guard()
         if target.get("name") == "Serylane":
             return
@@ -471,7 +540,7 @@ class Sync:
         confirmed = self.guard()
         if confirmed.get("id") != target_id or confirmed.get("name") != "Serylane":
             raise SyncError("Gitee did not confirm the display name on the same repository")
-        print("Gitee display name verified: Serylane; updater-compatible URL unchanged", flush=True)
+        print("Gitee display name verified: Serylane; canonical URL unchanged", flush=True)
 
     def source_assets(self, release, enforce_quota=True):
         release_id = release.get("id")
@@ -861,6 +930,8 @@ def main():
     parser.add_argument("--apply", action="store_true", help="Explicitly authorize writes to the checked Gitee repository")
     parser.add_argument("--sync-display-name", action="store_true",
                         help="Align the Gitee display name with Serylane without changing its URL")
+    parser.add_argument("--migrate-legacy-path", action="store_true",
+                        help="Migrate only original repository ID 50078322 to cmmuu/serylane before synchronization")
     args = parser.parse_args()
     gh_token, ge_token = os.environ.get("GITHUB_TOKEN"), os.environ.get("GITEE_TOKEN")
     if not gh_token or not ge_token:
@@ -871,7 +942,10 @@ def main():
     max_asset = configured_bytes("GITEE_MAX_ASSET_BYTES", GE_MAX_ASSET, MAX_ASSET)
     max_total = configured_bytes("GITEE_MAX_TOTAL_BYTES", GE_MAX_TOTAL, 100_000_000_000)
     reserved = configured_bytes("GITEE_OTHER_ATTACHMENT_BYTES", 0, max_total)
-    Sync(args.repo, Api("github", gh_token), Api("gitee", ge_token, extra_hosts), args.work_dir,
+    github, gitee = Api("github", gh_token), Api("gitee", ge_token, extra_hosts)
+    if args.migrate_legacy_path and not migrate_legacy_path(github, gitee, args.apply):
+        return
+    Sync(args.repo, github, gitee, args.work_dir,
          max_asset, max_total, reserved, args.transfer_workers).run(args.scope, args.apply, args.release_tag, args.keep_latest_releases, args.sync_display_name)
 
 

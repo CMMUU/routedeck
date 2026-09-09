@@ -18,8 +18,8 @@ Serylane 是基于 **Mihomo** 内核、使用 Rust + Tauri 2 构建的开源桌�
 ## 源码与下载
 
 - 官网：[Serylane](https://serylane.cmmuu.com/)（已上线，提供安装包下载与使用文档）。
-- 源码仓库：[GitHub](https://github.com/CMMUU/serylane) · [Gitee](https://gitee.com/cmmuu/routedeck)
-- 版本发布：[GitHub Releases](https://github.com/CMMUU/serylane/releases) · [Gitee Releases](https://gitee.com/cmmuu/routedeck/releases)
+- 源码仓库：[GitHub](https://github.com/CMMUU/serylane) · [Gitee](https://gitee.com/cmmuu/serylane)
+- 版本发布：[GitHub Releases](https://github.com/CMMUU/serylane/releases) · [Gitee Releases](https://gitee.com/cmmuu/serylane/releases)
 - 当前源码版本为 **0.7.6**，将远程订阅新增入口统一到「订阅」，通过「添加后选用」明确控制是否切换当前配置，保留 Serylane 品牌和 S 图标；见 [v0.7.6 发布说明](docs/发布说明-v0.7.6.md)。源码版本不表示对应安装包已公开发布，正式可用版本以两渠道实际 Release 与更新清单为准。
 - 安装包、SHA-256 校验文件和更新签名以 Release 页面实际附件为准；应用内自动更新同版本优先 Gitee，GitHub 备用。历史版本附件文件名保持不变。
 - Windows 10/11 TUN 为实验性功能，已实现管理员会话运行方式，尚未完成真实 TUN 路由与恢复验收。各平台的安装、构建和网络接管验证范围见 [v0.5.0 发布说明](docs/发布说明-v0.5.0.md)。

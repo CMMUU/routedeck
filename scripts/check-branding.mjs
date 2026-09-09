@@ -82,15 +82,17 @@ const updater = read("src-tauri/src/app_update.rs");
 for (const endpoint of [
   "https://github.com/CMMUU/serylane/releases/latest/download/latest-serylane.json",
   "https://github.com/CMMUU/serylane/releases/latest/download/latest.json",
-  "https://gitee.com/api/v5/repos/cmmuu/routedeck/releases/latest",
+  "https://gitee.com/api/v5/repos/cmmuu/serylane/releases/latest",
   "https://github.com/CMMUU/routedeck/releases",
-  "https://gitee.com/cmmuu/routedeck/releases",
+  "https://gitee.com/cmmuu/serylane/releases",
 ]) assert.ok(updater.includes(`"${endpoint}"`), `Retain updater endpoint: ${endpoint}`);
 assert.ok(updater.includes('format!("RouteDeck_{version}_{suffix}")'));
-assert.ok(updater.includes("if url.as_str() != expected && url.as_str() != legacy_channel && !legacy_github"));
+assert.match(updater, /if url\.as_str\(\) != expected\s*&& url\.as_str\(\) != legacy_channel\s*&& !legacy_github\s*&& !legacy_gitee/);
+assert.ok(read(".github/workflows/sync-gitee.yml").includes("--repo serylane"));
+assert.ok(read("scripts/sync_gitee.py").includes('SOURCE_REPOS = {"serylane": "serylane"}'));
 assert.ok(updater.includes('format!("{base}/download/{tag}/latest-serylane-gitee.json")'));
 assert.ok(read("scripts/updater_release.py").includes('("latest-serylane.json", "https://github.com/CMMUU/serylane")'));
-assert.ok(read("scripts/updater_release.py").includes('("latest-serylane-gitee.json", "https://gitee.com/cmmuu/routedeck")'));
+assert.ok(read("scripts/updater_release.py").includes('("latest-serylane-gitee.json", "https://gitee.com/cmmuu/serylane")'));
 assert.ok(updater.includes('"https://github.com/CMMUU/serylane/releases"'));
 for (const path of [".github/workflows/release.yml", ".github/workflows/sync-gitee.yml"]) {
   assert.ok(read(path).includes("github.repository == 'CMMUU/serylane'"));

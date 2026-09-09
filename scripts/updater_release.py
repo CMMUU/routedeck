@@ -15,8 +15,8 @@ LEGACY_CHANNELS = (
 )
 SERYLANE_CHANNELS = (
     ("latest-serylane.json", "https://github.com/CMMUU/serylane"),
-    # Gitee display name is Serylane; the actual URL remains updater-compatible.
-    ("latest-serylane-gitee.json", "https://gitee.com/cmmuu/routedeck"),
+    # Canonical Gitee path was renamed with the original repository identity.
+    ("latest-serylane-gitee.json", "https://gitee.com/cmmuu/serylane"),
 )
 UPDATER_MANIFESTS = frozenset(name for name, _ in (*LEGACY_CHANNELS, *SERYLANE_CHANNELS))
 

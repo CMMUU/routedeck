@@ -8,7 +8,7 @@ import sync_gitee as sync
 
 class TransferTests(unittest.TestCase):
     def job(self, workers=3):
-        return sync.Sync("routedeck", sync.Api("github", "offline-gh"),
+        return sync.Sync("serylane", sync.Api("github", "offline-gh"),
                          sync.Api("gitee", "offline-ge", {"extra.example"}), ".", transfer_workers=workers)
 
     def test_fork_has_separate_http_handlers_and_identical_security_scope(self):

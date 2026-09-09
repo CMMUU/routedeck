@@ -75,7 +75,7 @@ jobs:
         run: |
           # Explicitly approved retention: keep the newest stable release on
           # Gitee; GitHub history, release metadata and all Git tags stay intact.
-          args=(--repo routedeck --work-dir "$RUNNER_TEMP/gitee-sync" --keep-latest-releases 1 --transfer-workers 3 --sync-display-name)
+          args=(--repo serylane --work-dir "$RUNNER_TEMP/gitee-sync" --keep-latest-releases 1 --transfer-workers 3 --sync-display-name --migrate-legacy-path)
           if [ "$SYNC_DRY_RUN" != "true" ]; then
             args+=(--apply)
           fi

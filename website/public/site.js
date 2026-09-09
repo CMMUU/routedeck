@@ -66,8 +66,8 @@
     const gitee = document.querySelector("#download-gitee");
     github.href = `https://github.com/CMMUU/serylane/releases/download/${release.version}/${filename}`;
     gitee.href = domesticAvailable
-      ? `https://gitee.com/cmmuu/routedeck/releases/download/${release.version}/${filename}`
-      : `https://gitee.com/cmmuu/routedeck/releases/tag/${release.version}`;
+      ? `https://gitee.com/cmmuu/serylane/releases/download/${release.version}/${filename}`
+      : `https://gitee.com/cmmuu/serylane/releases/tag/${release.version}`;
     github.querySelector("span").textContent = domesticAvailable ? "GitHub 备用" : `GitHub 下载 · ${system.format}`;
     gitee.querySelector("span").textContent = domesticAvailable ? `国内下载 · ${system.format}` : "查看 Gitee 发布";
     github.classList.toggle("button-primary", !domesticAvailable);

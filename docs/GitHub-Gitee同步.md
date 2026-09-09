@@ -1,10 +1,14 @@
 # GitHub 与 Gitee 同步
 
-GitHub `CMMUU/routedeck` 是 RouteDeck 代码和正式发行版的来源，Gitee `cmmuu/routedeck` 保存国内副本。自 2026-09-04 起项目采用 GPL-3.0-only 开源，两站都应设为公开。先在 GitHub 完成测试、提交和发版，`Sync GitHub to Gitee` 工作流再复制全部分支、标签及最新正式版的原始附件。Gitee 同步不重新编译安装包。
+GitHub `CMMUU/serylane` 是 Serylane 代码和正式发行版的来源，Gitee `cmmuu/serylane` 保存国内副本。自 2026-09-04 起项目采用 GPL-3.0-only 开源，两站都应设为公开。先在 GitHub 完成测试、提交和发版，`Sync GitHub to Gitee` 工作流再复制全部分支、标签及最新正式版的原始附件。Gitee 同步不重新编译安装包。
 
-0.6.0 起项目名由 `mihomo-codex` 改为 `routedeck`。同步器按新仓库名进行精确目标校验，维护者应先完成两站仓库更名并核对 Git remotes，再运行写入同步。仓库更名不意味着新版本已经发布或同步成功。GitHub 历史版本的标题、附件、签名与校验值保持不变；Gitee 历史附件按下述保留策略清理。
+项目展示名为 `Serylane`，两站仓库路径统一为 `serylane`。同步器按新仓库名进行精确目标校验，维护者应先完成两站仓库更名并核对 Git remotes，再运行写入同步。仓库更名不意味着新版本已经发布或同步成功。GitHub 历史版本的标题、附件、签名与校验值保持不变；Gitee 历史附件按下述保留策略清理。
 
 ## 国内镜像保留策略
+
+实际路径迁移使用 `--migrate-legacy-path`，仅允许 GitHub 仓库 ID `1355770287` 与 Gitee 原仓库 ID `50078322`。先验证目标地址未被其他仓库占用、账号与可见性，再通过官方 PATCH 的 `name/path` 字段更名；更名后核对仓库 ID、主分支提交和全部 Release ID/标签不变。已迁移时只读验证，不重复写入。不会新建、删除或覆盖仓库。
+
+新版应用、官网和同步器使用 `cmmuu/serylane`。历史签名安装包及旧清单不重写，旧版客户端如遇国内旧 API 失效，可经 GitHub 备用渠道升级；不依赖 Gitee 为所有旧 API 提供重定向。
 
 2026-09-06 经维护者确认，Gitee **仅保留最新 1 个正式版本的镜像附件**；GitHub 完整历史、两站源码与 Git 标签，以及已有 Gitee Release 元数据不删除。工作流显式传入 `--keep-latest-releases 1`，本地脚本不传此参数仍采用不删除历史的旧行为。
 
@@ -15,7 +19,7 @@ GitHub `CMMUU/routedeck` 是 RouteDeck 代码和正式发行版的来源，Gitee
 - 只调用单个 Release 附件的删除接口；删除 Release、仓库和标签的 API 路径被禁止。每次删除后读回确认，结果不明确时不盲目重试。恢复旧版本应从 GitHub 获取原包，不能绕过保留策略把全部历史重新灌回 Gitee。
 - 手动工作流默认 `dry_run=true`，先列出保留版本、待清理版本、目标 Release ID 和预计字节数，不推送或删除任何远端数据。确认清单后以 `dry_run=false` 执行；自动事件按已批准的保留规则执行。
 - 同步使用 GitHub 托管的 Ubuntu ARM 运行器，手动入口保留 Ubuntu x64 选项用于排查停滞的云端网络连接；不在维护者的活动电脑上运行上传或安装。运行器只接受这两个固定官方标签，身份、配额与校验规则完全相同。日志分别显示源文件核验、上传、目标下载回验与清理阶段，不记录令牌或签名下载 URL。
-- 云端最多同时传输 3 个普通附件，每个任务使用独立 HTTP 客户端；完整容量预检仍在所有传输之前进行。任何文件失败后停止分配新文件，等待已在途请求收尾，不盲目重试；两个更新清单仍串行放在最后，只有全部安装包、签名和校验文件验证通过才发布。慢速跨境传输的工作流上限为 180 分钟。本地默认串行，显式传入 `--transfer-workers 3` 才开启并发。
+- 云端最多同时传输 3 个普通附件，每个任务使用独立 HTTP 客户端；完整容量预检仍在所有传输之前进行。任何文件失败后停止分配新文件，等待已在途请求收尾，不盲目重试；全部新旧更新清单仍串行放在最后，只有全部安装包、签名和校验文件验证通过才发布。慢速跨境传输的工作流上限为 180 分钟。本地默认串行，显式传入 `--transfer-workers 3` 才开启并发。
 
 ## 自动触发
 
@@ -68,8 +72,8 @@ Gitee Release API 没有与 GitHub 草稿等价的上传阶段，因此新版本
 环境需要 Python 3.10+ 与 Git。通过安全的进程环境注入 `GITHUB_TOKEN`、`GITEE_TOKEN`，不要在命令行中填写令牌。
 
 ```sh
-python3 scripts/sync_gitee.py --repo routedeck --scope all --keep-latest-releases 1 --work-dir /private/path/gitee-sync
-python3 scripts/sync_gitee.py --repo routedeck --scope all --keep-latest-releases 1 --work-dir /private/path/gitee-sync --apply
+python3 scripts/sync_gitee.py --repo serylane --scope all --keep-latest-releases 1 --work-dir /private/path/gitee-sync
+python3 scripts/sync_gitee.py --repo serylane --scope all --keep-latest-releases 1 --work-dir /private/path/gitee-sync --apply
 ```
 
 第一条仅进行身份、隐私和容量预检；第二条允许写入已经核实的目标。缓存可能包含私有代码和安装包，应使用私有目录。发现缓存或目标同名内容冲突时不要强行覆盖，应查明源资产是否被替换。

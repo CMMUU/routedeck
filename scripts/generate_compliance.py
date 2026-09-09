@@ -251,7 +251,7 @@ def main() -> None:
                 "licenses": [{"expression": package["license"]}],
                 "externalReferences": [
                     {"type": "vcs", "url": "https://github.com/CMMUU/serylane"},
-                    {"type": "vcs", "url": "https://gitee.com/cmmuu/routedeck"},
+                    {"type": "vcs", "url": "https://gitee.com/cmmuu/serylane"},
                 ],
             },
             "properties": [
