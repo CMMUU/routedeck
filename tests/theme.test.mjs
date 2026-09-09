@@ -155,14 +155,18 @@ test("invalid selection cannot reach persistence", async () => {
   assert.deepEqual(f.calls, []);
 });
 
-test("navigation and scroll surfaces keep rounded theme-native states", () => {
+test("navigation stays rounded and hidden scrollbars preserve accessible scrolling", () => {
   const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
   const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
 
   assert.match(css, /\.nav-list\s*\{[\s\S]*?background:\s*transparent;[\s\S]*?box-shadow:\s*none;\s*\}/);
   assert.match(css, /\.nav-item\s*\{[\s\S]*?overflow:\s*hidden;[\s\S]*?border-radius:\s*10px;/);
-  assert.match(css, /\.page-scroll::\-webkit-scrollbar-thumb[\s\S]*?border-radius:\s*999px;/);
-  assert.match(css, /\.page-scroll::\-webkit-scrollbar-button[\s\S]*?display:\s*none;/);
-  assert.match(css, /@supports not selector\(::\-webkit-scrollbar\)[\s\S]*?scrollbar-width:\s*thin;/);
+  const desktop = readFileSync(new URL("../src/desktop-theme.css", import.meta.url), "utf8");
+  assert.match(desktop, /scrollbar-width:\s*none;\s*scrollbar-gutter:\s*auto/);
+  assert.match(desktop, /\*::-webkit-scrollbar\s*\{\s*display:\s*none;\s*width:\s*0;\s*height:\s*0/);
+  assert.doesNotMatch(css + desktop, /scrollbar-width:\s*thin|scrollbar-gutter:\s*stable/);
+  assert.match(desktop, /scroll-behavior:\s*smooth/);
+  assert.match(desktop, /prefers-reduced-motion:\s*reduce[\s\S]*scroll-behavior:\s*auto/);
+  assert.match(main, /id="page-scroll" tabindex="0" role="region"/);
   assert.doesNotMatch(main, /rgba\(81,\s*45,\s*120|#c19aff/i);
 });

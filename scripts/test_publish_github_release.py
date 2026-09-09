@@ -15,7 +15,7 @@ from publish_github_release import (ReleaseError, collect_packages, package_name
 
 COMMIT = "a" * 40
 TAG = "v0.6.0"
-ENDPOINT = "/repos/CMMUU/routedeck/releases"
+ENDPOINT = "/repos/CMMUU/serylane/releases"
 
 
 class FakeGitHub:
@@ -169,6 +169,26 @@ class ReleaseTests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaisesRegex(ValueError, "Unreviewed local package"):
                 cargo_components({"package": [{"name": name, "version": "0.6.0"}]}, {"packages": []})
 
+    def test_current_brand_requires_serylane_package_and_preserves_historical_validation(self):
+        self.assertEqual(validate_version(self.root, TAG)[0], "0.6.0")
+        for relative in ("package.json", "package-lock.json", "src-tauri/tauri.conf.json",
+                         "src-tauri/Cargo.toml", "src-tauri/Cargo.lock"):
+            path = self.root / relative
+            path.write_text(path.read_text(encoding="utf-8").replace("0.6.0", "0.7.7").replace("routedeck", "serylane"), encoding="utf-8")
+        config_path = self.root / "src-tauri/tauri.conf.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config["bundle"] = {"createUpdaterArtifacts": True}
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+        (self.root / "docs/发布说明-v0.7.7.md").write_text("Reviewed Serylane notes", encoding="utf-8")
+        self.assertEqual(validate_version(self.root, "v0.7.7")[0], "0.7.7")
+        self.assertEqual(cargo_components({"package": [{"name": "serylane", "version": "0.7.7"}]}, {"packages": []}), [])
+        with self.assertRaisesRegex(ValueError, "Unreviewed local package"):
+            cargo_components({"package": [{"name": "routedeck", "version": "0.7.7"}]}, {"packages": []})
+        lock_path = self.root / "src-tauri/Cargo.lock"
+        lock_path.write_text(lock_path.read_text(encoding="utf-8").replace("serylane", "routedeck"), encoding="utf-8")
+        with self.assertRaisesRegex(ReleaseError, "exactly one application"):
+            validate_version(self.root, "v0.7.7")
+
     def test_legacy_named_sbom_cannot_be_used_for_the_renamed_release(self):
         self.prepare()
         path = self.output / "sbom.cdx.json"
@@ -247,12 +267,12 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(api.release["name"], f"RouteDeck {TAG}")
         self.assertEqual(api.release["body"], notes)
 
-    def test_brand_transition_changes_titles_but_keeps_installer_names(self):
+    def test_brand_transition_preserves_historical_names_and_renames_new_packages(self):
         self.assertEqual(release_title("v0.7.3"), "RouteDeck v0.7.3")
         for version in ("0.7.4", "0.8.0", "0.10.0", "1.0.0"):
             self.assertEqual(release_title(f"v{version}"), f"Serylane v{version}")
             self.assertEqual(package_names(version), {
-                platform: [name.replace("0.7.3", version) for name in names]
+                platform: [name.replace("0.7.3", version).replace("RouteDeck", "Serylane" if tuple(map(int, version.split('.'))) >= (0, 7, 7) else "RouteDeck") for name in names]
                 for platform, names in package_names("0.7.3").items()
             })
         for invalid in ("v0.7.04", "0.7.4", "v0.7.4-beta.1", "latest"):

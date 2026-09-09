@@ -21,6 +21,8 @@ pub enum AppError {
     Config(String),
     #[error("Mihomo 运行失败: {0}")]
     Runtime(String),
+    #[error("网络预检失败: {message}")]
+    NetworkPreflight { message: String, retryable: bool },
     #[error("系统网络设置失败: {0}")]
     Platform(String),
 }
@@ -36,6 +38,7 @@ impl AppError {
             Self::Update(_) => "UPDATE_ERROR",
             Self::Config(_) => "CONFIG_ERROR",
             Self::Runtime(_) => "CORE_ERROR",
+            Self::NetworkPreflight { .. } => "NETWORK_CHECK_FAILED",
             Self::Platform(_) => "PLATFORM_ERROR",
         }
     }
@@ -49,11 +52,15 @@ impl AppError {
             Self::Update(_) => "update",
             Self::Config(_) => "config",
             Self::Runtime(_) => "runtime",
+            Self::NetworkPreflight { .. } => "network",
             Self::Platform(_) => "platform",
         }
     }
 
     pub fn retryable(&self) -> bool {
+        if let Self::NetworkPreflight { retryable, .. } = self {
+            return *retryable;
+        }
         matches!(
             self,
             Self::Subscription(_) | Self::Update(_) | Self::Runtime(_) | Self::Platform(_)

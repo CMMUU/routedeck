@@ -77,6 +77,7 @@ export type AppSettings = {
   locale: string;
   theme: ThemePreference;
   launchAtLogin: boolean;
+  silentStartup: boolean;
   restoreLastSession: boolean;
   showGlobalTraffic: boolean;
   networkMode: NetworkMode;
@@ -87,6 +88,7 @@ export type AppSettings = {
   updateSource: UpdateSource;
   autoDownloadUpdates: boolean;
   diagnosticsRetentionDays: number;
+  appLogRetentionDays: number;
 };
 
 export type GlobalTrafficSnapshot = {
@@ -120,6 +122,13 @@ export type RuntimeLog = {
   level: string;
   source: string;
   message: string;
+};
+
+export type ApplicationLogSnapshot = {
+  entries: Array<{ timestamp: number; level: string; source: string; message: string; count: number }>;
+  retentionHours: number;
+  maxBytes: number;
+  storageError: string | null;
 };
 
 export type ProfileSource =
@@ -262,6 +271,7 @@ export type NetworkSafetyCheck = {
   url: string;
   success: boolean;
   expectedStatus: number;
+  failureKind?: "timeout" | "tls" | "dns" | "tunnel" | "connect" | "other" | null;
   actualStatus: number | null;
   latencyMs: number;
   detail: string;

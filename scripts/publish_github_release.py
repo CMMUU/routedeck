@@ -20,7 +20,7 @@ from generate_compliance import INPUT_PATHS, markdown as compliance_markdown, pr
 from updater_release import stage_updaters
 
 
-REPOSITORY = "CMMUU/routedeck"
+REPOSITORY = "CMMUU/serylane"
 MAX_SOURCE_BYTES = 256 * 1024 * 1024
 
 
@@ -46,16 +46,17 @@ def release_title(tag):
 def package_names(version):
     # Tauri CLI 2.11.4 uses productName, not mainBinaryName, for bundle filenames.
     # Linux package metadata is kebab-cased separately; filenames retain the brand.
-    prefix = f"RouteDeck_{version}"
+    brand = "Serylane" if tuple(map(int, version.split("."))) >= (0, 7, 7) else "RouteDeck"
+    prefix = f"{brand}_{version}"
     return {
         "macos-aarch64": [f"{prefix}_aarch64.dmg"],
         "macos-x64": [f"{prefix}_x64.dmg"],
         "windows-x64": [f"{prefix}_x64-setup.exe", f"{prefix}_x64_en-US.msi"],
         "windows-arm64": [f"{prefix}_arm64-setup.exe", f"{prefix}_arm64_en-US.msi"],
         "linux-x64": [f"{prefix}_amd64.AppImage", f"{prefix}_amd64.deb",
-                      f"RouteDeck-{version}-1.x86_64.rpm"],
+                      f"{brand}-{version}-1.x86_64.rpm"],
         "linux-arm64": [f"{prefix}_aarch64.AppImage", f"{prefix}_arm64.deb",
-                        f"RouteDeck-{version}-1.aarch64.rpm"],
+                        f"{brand}-{version}-1.aarch64.rpm"],
     }
 
 
@@ -68,7 +69,7 @@ def validate_version(root, tag):
     versions.append(tomllib.loads((root / "src-tauri/Cargo.toml").read_text(encoding="utf-8"))["package"]["version"])
     npm_lock = json.loads((root / "package-lock.json").read_text(encoding="utf-8"))
     versions.extend([npm_lock["version"], npm_lock["packages"][""]["version"]])
-    application = [item for item in tomllib.loads((root / "src-tauri/Cargo.lock").read_text(encoding="utf-8"))["package"] if item["name"] == "routedeck" and not item.get("source")]
+    application = [item for item in tomllib.loads((root / "src-tauri/Cargo.lock").read_text(encoding="utf-8"))["package"] if item["name"] == ("serylane" if tuple(map(int, version.split("."))) >= (0, 7, 7) else "routedeck") and not item.get("source")]
     if len(application) != 1:
         raise ReleaseError("Cargo.lock must contain exactly one application package")
     versions.append(application[0]["version"])
@@ -76,7 +77,7 @@ def validate_version(root, tag):
         raise ReleaseError("Release tag does not match all application versions")
     config = json.loads((root / "src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
     if tuple(map(int, version.split("."))) >= (0, 7, 0) and config.get("bundle", {}).get("createUpdaterArtifacts") is not True:
-        raise ReleaseError("RouteDeck 0.7.0 and later require signed updater artifacts")
+        raise ReleaseError("Serylane 0.7.0 and later require signed updater artifacts")
     notes = root / "docs" / f"发布说明-{tag}.md"
     if not notes.is_file() or not notes.read_text(encoding="utf-8").strip():
         raise ReleaseError(f"Reviewed release notes are required: docs/发布说明-{tag}.md")
@@ -113,7 +114,7 @@ class SourceRedirects(HTTPRedirectHandler):
 
 def download_source(url, destination):
     opener = build_opener(SourceRedirects())
-    request = Request(url, headers={"User-Agent": "routedeck-release"})
+    request = Request(url, headers={"User-Agent": "serylane-release"})
     total = 0
     with opener.open(request, timeout=120) as response, destination.open("wb") as output:
         while block := response.read(1024 * 1024):
@@ -150,7 +151,7 @@ def validate_compliance(root, output, version):
     bom = json.loads((output / "sbom.cdx.json").read_text(encoding="utf-8"))
     component = bom.get("metadata", {}).get("component", {})
     if (bom.get("bomFormat") != "CycloneDX" or bom.get("specVersion") != "1.6"
-            or component.get("name") != "routedeck" or component.get("version") != version
+            or component.get("name") != ("serylane" if tuple(map(int, version.split("."))) >= (0, 7, 7) else "routedeck") or component.get("version") != version
             or component.get("licenses") != [{"expression": "GPL-3.0-only"}]):
         raise ReleaseError("Generated SBOM application metadata does not match the release")
     inputs = {path: sha256(root / path) for path in INPUT_PATHS}
@@ -204,7 +205,8 @@ def prepare_assets(root, artifacts, output, tag, fetch_source=download_source,
         validate_compliance(root, compliance, version)
         for name in ("sbom.cdx.json", "license-inventory.md"):
             shutil.copyfile(compliance / name, output / name)
-    shutil.copyfile(root / "LICENSE", output / "RouteDeck-LICENSE.txt")
+    license_brand = "Serylane" if tuple(map(int, version.split("."))) >= (0, 7, 7) else "RouteDeck"
+    shutil.copyfile(root / "LICENSE", output / f"{license_brand}-LICENSE.txt")
     for path in packages:
         shutil.copyfile(path, output / path.name)
     stage_updaters(root, artifacts, output, version, notes)
@@ -344,7 +346,7 @@ def main():
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     if os.environ.get("GITHUB_REPOSITORY", REPOSITORY) != REPOSITORY:
-        raise ReleaseError("Publishing is restricted to CMMUU/routedeck")
+        raise ReleaseError("Publishing is restricted to CMMUU/serylane")
     root = Path(__file__).resolve().parent.parent
     if args.apply:
         checked_out = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],

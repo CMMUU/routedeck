@@ -18,8 +18,8 @@ Serylane 是基于 **Mihomo** 内核、使用 Rust + Tauri 2 构建的开源桌�
 ## 源码与下载
 
 - 官网：[Serylane](https://serylane.cmmuu.com/)（已上线，提供安装包下载与使用文档）。
-- 源码仓库：[GitHub](https://github.com/CMMUU/routedeck) · [Gitee](https://gitee.com/cmmuu/routedeck)
-- 版本发布：[GitHub Releases](https://github.com/CMMUU/routedeck/releases) · [Gitee Releases](https://gitee.com/cmmuu/routedeck/releases)
+- 源码仓库：[GitHub](https://github.com/CMMUU/serylane) · [Gitee](https://gitee.com/cmmuu/routedeck)
+- 版本发布：[GitHub Releases](https://github.com/CMMUU/serylane/releases) · [Gitee Releases](https://gitee.com/cmmuu/routedeck/releases)
 - 当前源码版本为 **0.7.6**，将远程订阅新增入口统一到「订阅」，通过「添加后选用」明确控制是否切换当前配置，保留 Serylane 品牌和 S 图标；见 [v0.7.6 发布说明](docs/发布说明-v0.7.6.md)。源码版本不表示对应安装包已公开发布，正式可用版本以两渠道实际 Release 与更新清单为准。
 - 安装包、SHA-256 校验文件和更新签名以 Release 页面实际附件为准；应用内自动更新同版本优先 Gitee，GitHub 备用。历史版本附件文件名保持不变。
 - Windows 10/11 TUN 为实验性功能，已实现管理员会话运行方式，尚未完成真实 TUN 路由与恢复验收。各平台的安装、构建和网络接管验证范围见 [v0.5.0 发布说明](docs/发布说明-v0.5.0.md)。
@@ -171,4 +171,6 @@ src-tauri/binaries/mihomo-<target-triple>
 
 构建脚本校验固定压缩资产的 SHA-256，并验证当前平台的 `mihomo -v` 输出。CI 在 macOS、Windows 和 Linux 原生 runner 执行。
 
-推送稳定版本标签 `vX.Y.Z` 后，`Release bundles` 在六个平台全部构建成功后自动创建 GitHub Release。标签必须与 `package.json`、Tauri 和 Cargo 版本一致，并提交对应的 `docs/发布说明-vX.Y.Z.md`。发布作业从该标签的锁文件重新生成依赖 SBOM 与许可证清单，核对输入 SHA-256 和项目许可元数据；收齐 12 个安装包、Mihomo GPL 许可证及上游源码、项目 `RouteDeck-LICENSE.txt`、`sbom.cdx.json`、`license-inventory.md`，加上 `SHA256SUMS.txt` 共 18 个附件，上传及 SHA-256 校验全部通过后才公开草稿。重复运行会复用内容相同的附件，遇到同名不同内容则停止，不覆盖原发布包。此规则适用于后续新发行版，v0.5.0 已发布的 15 个附件保持原样。手动 `workflow_dispatch` 只构建并保留 Actions artifacts，不创建发行版。
+推送稳定版本标签 `vX.Y.Z` 后，`Release bundles` 在六个平台全部构建成功后自动创建 GitHub Release。标签必须与 `package.json`、Tauri 和 Cargo 版本一致，并提交对应的 `docs/发布说明-vX.Y.Z.md`。发布作业从该标签的锁文件重新生成依赖 SBOM 与许可证清单，核对输入 SHA-256 和项目许可元数据；收齐安装包、签名更新包与兼容别名、Mihomo GPL 许可证及上游源码、项目许可证、`sbom.cdx.json`、`license-inventory.md` 和 `SHA256SUMS.txt`，校验全部通过后才公开草稿。0.7.7 起公开安装包和项目许可证使用 Serylane 名称。重复运行复用内容相同的附件，遇到同名不同内容则停止，不覆盖历史发布包。手动 `workflow_dispatch` 指定正式标签时同样经过完整构建与发布校验。
+
+源码与发布工作流使用 `CMMUU/serylane`。国内同步明确映射至现有 Gitee 路径，以保持已安装客户端的更新入口有效；应用数据标识、签名密钥和旧更新文件别名属于兼容协议，不随展示名称变更。

@@ -64,7 +64,7 @@
     const domesticAvailable = release.domesticAvailable.has(`${selectedSystem}:${selectedArchitecture}`);
     const github = document.querySelector("#download-github");
     const gitee = document.querySelector("#download-gitee");
-    github.href = `https://github.com/CMMUU/routedeck/releases/download/${release.version}/${filename}`;
+    github.href = `https://github.com/CMMUU/serylane/releases/download/${release.version}/${filename}`;
     gitee.href = domesticAvailable
       ? `https://gitee.com/cmmuu/routedeck/releases/download/${release.version}/${filename}`
       : `https://gitee.com/cmmuu/routedeck/releases/tag/${release.version}`;

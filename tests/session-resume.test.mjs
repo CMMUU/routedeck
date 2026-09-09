@@ -46,6 +46,8 @@ test("restore help distinguishes login launch, manual opening and opt out", () =
   assert.match(sessionResumeHelp(true, true), /不会自动接入 Codex 或启动其他程序/);
   assert.doesNotMatch(sessionResumeHelp(false, false), /登录后自动/);
   assert.match(sessionResumeHelp(false, false), /不会自动启动代理核心/);
+  assert.match(sessionResumeHelp(true, true, true), /托盘后台恢复/);
+  assert.doesNotMatch(sessionResumeHelp(true, true, true), /自动打开应用/);
 });
 
 test("settings save, polling and event paths are wired to the same persisted option", () => {

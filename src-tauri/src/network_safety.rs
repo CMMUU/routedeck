@@ -48,6 +48,27 @@ pub struct NetworkSafetyCheck {
     pub actual_status: Option<u16>,
     pub latency_ms: u128,
     pub detail: String,
+    pub failure_kind: Option<TransportFailure>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TransportFailure {
+    Timeout,
+    Tls,
+    Dns,
+    Tunnel,
+    Connect,
+    Other,
+}
+
+impl TransportFailure {
+    fn transient(self) -> bool {
+        matches!(
+            self,
+            Self::Timeout | Self::Dns | Self::Tunnel | Self::Connect
+        )
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -64,6 +85,7 @@ pub async fn verify_local_proxy(settings: &AppSettings) -> AppResult<NetworkSafe
     let proxy =
         reqwest::Proxy::all(&endpoint).map_err(|error| AppError::Runtime(error.to_string()))?;
     let client = reqwest::Client::builder()
+        .no_proxy()
         .proxy(proxy)
         .connect_timeout(Duration::from_secs(5))
         .timeout(Duration::from_secs(12))
@@ -71,10 +93,64 @@ pub async fn verify_local_proxy(settings: &AppSettings) -> AppResult<NetworkSafe
         .build()
         .map_err(|error| AppError::Runtime(error.to_string()))?;
 
-    require_connectivity(
-        run_checks(&client, endpoint, SAFETY_TARGETS).await,
-        "代理基础连通性预检失败",
-    )
+    let mut report = run_checks(&client, endpoint.clone(), SAFETY_TARGETS).await;
+    if should_retry(&report) {
+        crate::app_log::record(
+            1,
+            crate::app_log::Area::Network,
+            "本地核心已就绪，但外网检测出现传输错误；等待 1 秒后仅重试一次健康检查",
+        );
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        report = run_checks(&client, endpoint, SAFETY_TARGETS).await;
+    }
+    require_connectivity(report, "代理基础连通性预检失败")
+}
+
+fn should_retry(report: &NetworkSafetyReport) -> bool {
+    !report.success
+        && report.checks.iter().any(|check| {
+            check.target != "openai" && check.failure_kind.is_some_and(TransportFailure::transient)
+        })
+}
+
+fn transport_error(error: &reqwest::Error) -> (TransportFailure, String) {
+    use std::error::Error;
+    let mut causes = Vec::new();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        causes.push(cause.to_string());
+        if causes.len() >= 5 {
+            break;
+        }
+        source = cause.source();
+    }
+    let chain = causes.join(" → ");
+    let lower = chain.to_ascii_lowercase();
+    let (kind, category) = if lower.contains("certificate") || lower.contains("invalid peer") {
+        (TransportFailure::Tls, "TLS/证书校验失败（未绕过校验）")
+    } else if error.is_timeout() {
+        (TransportFailure::Timeout, "连接或响应超时")
+    } else if lower.contains("dns") || lower.contains("resolve") {
+        (TransportFailure::Dns, "DNS 解析失败")
+    } else if lower.contains("tunnel") {
+        (TransportFailure::Tunnel, "代理 CONNECT 隧道建立失败")
+    } else if lower.contains("tls") {
+        (TransportFailure::Tls, "TLS 握手失败（未绕过校验）")
+    } else if error.is_connect()
+        || ["connection reset", "broken pipe", "unexpected eof"]
+            .iter()
+            .any(|term| lower.contains(term))
+    {
+        (TransportFailure::Connect, "TCP/代理连接失败")
+    } else {
+        (TransportFailure::Other, "网络传输失败")
+    };
+    let detail = if chain.is_empty() {
+        category.to_string()
+    } else {
+        format!("{category}：{}", crate::app_log::sanitize(&chain))
+    };
+    (kind, detail)
 }
 
 pub async fn verify_tun_route() -> AppResult<NetworkSafetyReport> {
@@ -102,6 +178,16 @@ async fn run_checks(
         check_target(client, targets[2]),
     );
     let checks = vec![first, second, third];
+    for check in &checks {
+        crate::app_log::record(
+            if check.success { 0 } else { 1 },
+            crate::app_log::Area::Network,
+            &format!(
+                "{}；{}；{} ms",
+                check.target, check.detail, check.latency_ms
+            ),
+        );
+    }
     // OpenAI can reject an otherwise working route because of its own service
     // policy. Only the general connectivity targets decide whether it is usable.
     let success = checks
@@ -147,9 +233,12 @@ fn require_connectivity(
             .map(|check| format!("{}: {}", check.target, check.detail))
             .collect::<Vec<_>>()
             .join("; ");
-        Err(AppError::Runtime(format!(
-            "{failure_context}，基础连通性目标均未通过: {failed}"
-        )))
+        Err(AppError::NetworkPreflight {
+            retryable: should_retry(&report),
+            message: format!(
+                "{failure_context}，本地核心已启动，但基础连通性目标均未通过: {failed}。请在“日志 → 应用日志”查看原因，并检查所选节点、系统时间及安全软件；未跳过安全预检"
+            ),
+        })
     }
 }
 
@@ -174,22 +263,31 @@ async fn check_target(
                 expected_status,
                 actual_status: Some(actual_status),
                 latency_ms: started.elapsed().as_millis(),
+                failure_kind: None,
                 detail: if success {
-                    format!("HTTP {actual_status}")
+                    if expected_status == 401 {
+                        "HTTP 401：仅证明接口可达，未验证登录或模型请求".into()
+                    } else {
+                        format!("HTTP {actual_status}")
+                    }
                 } else {
                     format!("期望 HTTP {expected_status}，实际 HTTP {actual_status}")
                 },
             }
         }
-        Err(error) => NetworkSafetyCheck {
-            target: target.to_string(),
-            url: url.to_string(),
-            success: false,
-            expected_status,
-            actual_status: None,
-            latency_ms: started.elapsed().as_millis(),
-            detail: error.to_string(),
-        },
+        Err(error) => {
+            let (kind, detail) = transport_error(&error);
+            NetworkSafetyCheck {
+                target: target.to_string(),
+                url: url.to_string(),
+                success: false,
+                expected_status,
+                actual_status: None,
+                latency_ms: started.elapsed().as_millis(),
+                detail,
+                failure_kind: Some(kind),
+            }
+        }
     }
 }
 
@@ -264,6 +362,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn loopback_connect_failure_retries_get_probes_only_and_reports_network_stage() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            for _ in 0..6 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut buffer = [0; 2048];
+                let count = stream.read(&mut buffer).await.unwrap();
+                let request = String::from_utf8_lossy(&buffer[..count]);
+                assert!(request.starts_with("CONNECT "));
+                assert!([
+                    "www.google.com:443",
+                    "cp.cloudflare.com:443",
+                    "api.openai.com:443"
+                ]
+                .iter()
+                .any(|host| request.contains(host)));
+                assert!(!request.to_ascii_lowercase().contains("authorization:"));
+                stream.write_all(b"HTTP/1.1 503 Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+            }
+        });
+        let settings = AppSettings {
+            mixed_port: port,
+            ..Default::default()
+        };
+        let error = tokio::time::timeout(Duration::from_secs(8), verify_local_proxy(&settings))
+            .await
+            .unwrap()
+            .unwrap_err()
+            .dto();
+        assert_eq!(error.code, "NETWORK_CHECK_FAILED");
+        assert_eq!(error.stage, "network");
+        assert!(error.retryable);
+        tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn one_connectivity_target_and_openai_403_allow_the_route() {
         for statuses in [[204, 503, 403], [503, 204, 403]] {
             let report = check_mock_statuses(statuses).await;
@@ -300,6 +438,40 @@ mod tests {
         assert!(report.checks.iter().all(|check| check.success));
         assert!(report.warnings.is_empty());
         assert!(require_connectivity(report, "验收失败").is_ok());
+    }
+
+    #[tokio::test]
+    async fn retries_only_failed_transport_not_success_or_http_rejections() {
+        let mut report = check_mock_statuses([503, 403, 401]).await;
+        assert!(!should_retry(&report));
+        report.checks[0].actual_status = None;
+        report.checks[0].failure_kind = Some(TransportFailure::Timeout);
+        assert!(should_retry(&report));
+        report.checks[0].failure_kind = Some(TransportFailure::Tls);
+        assert!(!should_retry(&report));
+        report.success = true;
+        assert!(!should_retry(&report));
+        let report = check_mock_statuses([204, 204, 401]).await;
+        assert!(report.checks[2].detail.contains("未验证登录或模型请求"));
+    }
+
+    #[tokio::test]
+    async fn connection_errors_have_a_cause_without_leaking_url_credentials() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        drop(listener);
+        let error = reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap()
+            .get(format!("http://{address}/private?token=do-not-log"))
+            .send()
+            .await
+            .unwrap_err();
+        let (_, detail) = transport_error(&error);
+        assert!(detail.contains("连接失败"));
+        assert!(!detail.contains("private"));
+        assert!(!detail.contains("do-not-log"));
     }
 
     #[tokio::test]

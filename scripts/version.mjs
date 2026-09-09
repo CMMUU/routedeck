@@ -9,7 +9,7 @@ export function versions(base = root) {
   const packageInfo = JSON.parse(read(base, "package.json"));
   const lock = JSON.parse(read(base, "package-lock.json"));
   const cargo = read(base, "src-tauri/Cargo.toml").match(/\[package\][\s\S]*?\nversion = "([^"]+)"/);
-  const cargoLock = read(base, "src-tauri/Cargo.lock").match(/\[\[package\]\]\r?\nname = "routedeck"\r?\nversion = "([^"]+)"/);
+  const cargoLock = read(base, "src-tauri/Cargo.lock").match(/\[\[package\]\]\r?\nname = "serylane"\r?\nversion = "([^"]+)"/);
   return { "package.json": packageInfo.version, "package-lock.json": lock.version,
     "package-lock root": lock.packages?.[""]?.version, "Cargo.toml": cargo?.[1], "Cargo.lock": cargoLock?.[1],
     "tauri.conf.json": JSON.parse(read(base, "src-tauri/tauri.conf.json")).version };
@@ -32,7 +32,7 @@ export function setVersion(version, base = root) {
     files.set(path, `${JSON.stringify(object, null, 2)}\n`);
   }
   files.set("src-tauri/Cargo.toml", read(base, "src-tauri/Cargo.toml").replace(/(\[package\][\s\S]*?\nversion = ")[^"]+("\r?\n)/, `$1${version}$2`));
-  files.set("src-tauri/Cargo.lock", read(base, "src-tauri/Cargo.lock").replace(/(\[\[package\]\]\r?\nname = "routedeck"\r?\nversion = ")[^"]+("\r?\n)/, `$1${version}$2`));
+  files.set("src-tauri/Cargo.lock", read(base, "src-tauri/Cargo.lock").replace(/(\[\[package\]\]\r?\nname = "serylane"\r?\nversion = ")[^"]+("\r?\n)/, `$1${version}$2`));
   for (const [path, content] of files) writeFileSync(resolve(base, path), content);
   return verifyVersions(base);
 }

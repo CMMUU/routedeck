@@ -12,8 +12,9 @@ import sync_gitee as sync
 
 
 def repo_metadata(owner):
-    return {"full_name": f"{owner}/routedeck", "path": "routedeck", "private": False,
-            "owner": {"login": owner}, "html_url": f"https://gitee.com/{owner}/routedeck"}
+    repo = "serylane" if owner == "CMMUU" else "routedeck"
+    return {"full_name": f"{owner}/{repo}", "path": repo, "private": False,
+            "owner": {"login": owner}, "html_url": f"https://gitee.com/{owner}/{repo}"}
 
 
 class Source:
@@ -29,17 +30,17 @@ class Source:
         self.contents[asset_id] = data
         self.assets[release_id] = [{"id": asset_id, "name": "package.zip", "size": len(data),
                                    "state": "uploaded", "digest": "sha256:" + hashlib.sha256(data).hexdigest(),
-                                   "url": f"https://api.github.com/repos/CMMUU/routedeck/releases/assets/{asset_id}"}]
+                                   "url": f"https://api.github.com/repos/CMMUU/serylane/releases/assets/{asset_id}"}]
         return release
 
     def request(self, path):
-        assert path == "/repos/CMMUU/routedeck"
+        assert path == "/repos/CMMUU/serylane"
         return repo_metadata("CMMUU")
 
     def pages(self, path):
         if path.endswith("/releases"):
             return deepcopy(self.releases)
-        match = re.fullmatch(r"/repos/CMMUU/routedeck/releases/(\d+)/assets", path)
+        match = re.fullmatch(r"/repos/CMMUU/serylane/releases/(\d+)/assets", path)
         assert match, path
         return deepcopy(self.assets[int(match[1])])
 

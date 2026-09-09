@@ -8,7 +8,7 @@ const script = await readFile(new URL('../public/site.js', import.meta.url), 'ut
 // Independent, publicly verified 2026-09-08 release snapshot. These tests are
 // offline: changing the release requires checking the remote assets again.
 const version = 'v0.7.6';
-const githubBase = `https://github.com/CMMUU/routedeck/releases/download/${version}/`;
+const githubBase = `https://github.com/CMMUU/serylane/releases/download/${version}/`;
 const giteeBase = `https://gitee.com/cmmuu/routedeck/releases/download/${version}/`;
 const giteeRelease = `https://gitee.com/cmmuu/routedeck/releases/tag/${version}`;
 const downloads = [
@@ -191,7 +191,7 @@ check('No-JavaScript HTML offers verified GitHub Windows x64, a domestic release
   const fallback = html.match(/<noscript>([\s\S]*?)<\/noscript>/)?.[1] ?? '';
   assert.match(fallback, /Windows x64/);
   assert.match(fallback, /JavaScript/);
-  assert.ok(fallback.includes(`href="https://github.com/CMMUU/routedeck/releases/tag/${version}"`));
+  assert.ok(fallback.includes(`href="https://github.com/CMMUU/serylane/releases/tag/${version}"`));
   assert.equal(contentById('channel-note'), '国内镜像暂缺 Windows x64 EXE 安装包，请使用 GitHub。');
 });
 

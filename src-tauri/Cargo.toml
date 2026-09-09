@@ -1,11 +1,11 @@
 [package]
-name = "routedeck"
-version = "0.7.6"
+name = "serylane"
+version = "0.7.7"
 license = "GPL-3.0-only"
 description = "Serylane: lightweight cross-platform Mihomo desktop client"
 authors = ["cmmuu"]
 edition = "2021"
-default-run = "routedeck"
+default-run = "serylane"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -13,7 +13,7 @@ default-run = "routedeck"
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "routedeck_lib"
+name = "serylane_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

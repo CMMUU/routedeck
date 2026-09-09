@@ -1189,7 +1189,7 @@ td small { color: var(--muted); }
   overflow-y: auto;
   padding-bottom: 60px;
   overscroll-behavior-y: contain;
-  scrollbar-gutter: stable;
+  scrollbar-gutter: auto;
   scroll-padding-top: 16px;
 }
 :root.is-modal-open .page-scroll { overflow: hidden; }
@@ -1839,61 +1839,6 @@ td small { color: var(--muted); }
   overflow-y: auto;
   background: transparent;
   box-shadow: none;
-}
-
-/* Keep every scroll surface visually inside the same rounded design language. */
-.page-scroll::-webkit-scrollbar,
-.nav-list::-webkit-scrollbar,
-.log-list::-webkit-scrollbar,
-.node-details-modal::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
-}
-.page-scroll::-webkit-scrollbar-track,
-.nav-list::-webkit-scrollbar-track,
-.log-list::-webkit-scrollbar-track,
-.node-details-modal::-webkit-scrollbar-track {
-  margin-block: 10px;
-  border-radius: 999px;
-  background: transparent;
-}
-.page-scroll::-webkit-scrollbar-thumb,
-.nav-list::-webkit-scrollbar-thumb,
-.log-list::-webkit-scrollbar-thumb,
-.node-details-modal::-webkit-scrollbar-thumb {
-  min-height: 48px;
-  border: 3px solid transparent;
-  border-radius: 999px;
-  background: var(--scrollbar-thumb);
-  background-clip: content-box;
-}
-.page-scroll::-webkit-scrollbar-thumb:hover,
-.nav-list::-webkit-scrollbar-thumb:hover,
-.log-list::-webkit-scrollbar-thumb:hover,
-.node-details-modal::-webkit-scrollbar-thumb:hover {
-  background-color: var(--scrollbar-thumb-hover);
-}
-.page-scroll::-webkit-scrollbar-button,
-.nav-list::-webkit-scrollbar-button,
-.log-list::-webkit-scrollbar-button,
-.node-details-modal::-webkit-scrollbar-button,
-.page-scroll::-webkit-scrollbar-corner,
-.nav-list::-webkit-scrollbar-corner,
-.log-list::-webkit-scrollbar-corner,
-.node-details-modal::-webkit-scrollbar-corner {
-  display: none;
-  width: 0;
-  height: 0;
-  background: transparent;
-}
-@supports not selector(::-webkit-scrollbar) {
-  .page-scroll,
-  .nav-list,
-  .log-list,
-  .node-details-modal {
-    scrollbar-color: var(--scrollbar-thumb) transparent;
-    scrollbar-width: thin;
-  }
 }
 
 /* Approved compact global traffic monitor: status left, upload above download. */

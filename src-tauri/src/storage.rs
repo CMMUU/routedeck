@@ -20,6 +20,9 @@ pub struct AppStorage {
 }
 
 impl AppStorage {
+    pub(crate) fn app_log_path(&self) -> PathBuf {
+        self.root.join("app-log-v1.json")
+    }
     pub(crate) fn routing_dir(&self) -> PathBuf {
         self.root.join("local-routing")
     }
@@ -469,7 +472,7 @@ fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> AppResult<()> {
     write_private_atomic(path, &content)
 }
 
-fn write_private_atomic(path: &Path, bytes: &[u8]) -> AppResult<()> {
+pub(crate) fn write_private_atomic(path: &Path, bytes: &[u8]) -> AppResult<()> {
     let parent = path
         .parent()
         .ok_or_else(|| AppError::Io("文件没有父目录".to_string()))?;

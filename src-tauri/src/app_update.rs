@@ -14,7 +14,10 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 use url::Url;
 
 const GITHUB_MANIFEST: &str =
-    "https://github.com/CMMUU/routedeck/releases/latest/download/latest.json";
+    "https://github.com/CMMUU/serylane/releases/latest/download/latest.json";
+// Published <= 0.7.6 clients require this exact URL in latest.json. Keep the
+// signed compatibility alias while all visible release links use Serylane.
+const LEGACY_GITHUB_RELEASES: &str = "https://github.com/CMMUU/routedeck/releases";
 const GITEE_RELEASE: &str = "https://gitee.com/api/v5/repos/cmmuu/routedeck/releases/latest";
 const MAX_METADATA_BYTES: usize = 512 * 1024;
 const MAX_DOWNLOAD_BYTES: u64 = 256 * 1024 * 1024;
@@ -38,7 +41,7 @@ impl UpdateSource {
     }
     fn release_base(self) -> AppResult<&'static str> {
         match self {
-            Self::Github => Ok("https://github.com/CMMUU/routedeck/releases"),
+            Self::Github => Ok("https://github.com/CMMUU/serylane/releases"),
             Self::Gitee => Ok("https://gitee.com/cmmuu/routedeck/releases"),
             Self::Auto => Err(failure("请指定实际发布渠道")),
         }
@@ -217,7 +220,13 @@ fn validate_asset(
         source.release_base()?,
         artifact_name(target, version)?
     );
-    if url.as_str() != expected {
+    let legacy_github = matches!(source, UpdateSource::Github)
+        && url.as_str()
+            == format!(
+                "{LEGACY_GITHUB_RELEASES}/download/v{version}/{}",
+                artifact_name(target, version)?
+            );
+    if url.as_str() != expected && !legacy_github {
         return Err(failure("更新包地址与官方渠道、版本或架构不一致"));
     }
     let platform = &raw["platforms"][target];
@@ -260,7 +269,7 @@ async fn gitee_manifest(proxy: Option<&Url>) -> AppResult<Url> {
         .get(GITEE_RELEASE)
         .header(
             "User-Agent",
-            concat!("RouteDeck/", env!("CARGO_PKG_VERSION")),
+            concat!("Serylane/", env!("CARGO_PKG_VERSION")),
         )
         .send()
         .await
@@ -692,7 +701,7 @@ pub async fn install_app_update(
                 "安装启动失败：{e}。代理已安全停止，可重新启动后重试。"
             ))
         })?;
-        // Windows exits from install(); its installer relaunches RouteDeck.
+        // Windows exits from install(); its installer relaunches Serylane.
         #[cfg(not(windows))]
         {
             app.restart()
@@ -767,11 +776,47 @@ mod tests {
     #[test]
     fn official_urls_are_derived_from_source_and_strict_tag() {
         assert_eq!(
+            official_release_url(UpdateSource::Github, "v0.7.7").unwrap(),
+            "https://github.com/CMMUU/serylane/releases/tag/v0.7.7"
+        );
+        assert_eq!(
             official_release_url(UpdateSource::Gitee, "v1.2.3").unwrap(),
             "https://gitee.com/cmmuu/routedeck/releases/tag/v1.2.3"
         );
         assert!(official_release_url(UpdateSource::Auto, "v1.2.3").is_err());
         assert!(official_release_url(UpdateSource::Github, "v1.2.3?redirect=evil").is_err());
+    }
+    #[test]
+    fn github_rename_accepts_only_exact_current_and_legacy_update_assets() {
+        let raw = serde_json::json!({ "platforms": { "windows-x86_64": { "sha256": "a".repeat(64), "size": 100 } } });
+        for repo in ["serylane", "routedeck"] {
+            let url = format!("https://github.com/CMMUU/{repo}/releases/download/v0.7.7/RouteDeck_0.7.7_x64-setup.exe");
+            assert!(validate_asset(
+                UpdateSource::Github,
+                "windows-x86_64",
+                "0.7.7",
+                &Url::parse(&url).unwrap(),
+                &raw
+            )
+            .is_ok());
+            for invalid in [
+                url.replace("CMMUU", "other"),
+                url.replace("github.com", "github.com.attacker"),
+                url.replace(repo, "other-repository"),
+                url.replace("v0.7.7/", "v0.7.8/"),
+                url.replace("_x64-", "_arm64-"),
+                format!("{url}?redirect=other"),
+            ] {
+                assert!(validate_asset(
+                    UpdateSource::Github,
+                    "windows-x86_64",
+                    "0.7.7",
+                    &Url::parse(&invalid).unwrap(),
+                    &raw
+                )
+                .is_err());
+            }
+        }
     }
     #[test]
     fn asset_validation_binds_channel_version_arch_hash_and_size() {

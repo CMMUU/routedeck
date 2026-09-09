@@ -102,6 +102,8 @@ pub struct AppSettings {
     pub locale: String,
     pub theme: String,
     pub launch_at_login: bool,
+    #[serde(default)]
+    pub silent_startup: bool,
     #[serde(default = "default_true")]
     pub restore_last_session: bool,
     #[serde(default = "default_true")]
@@ -118,6 +120,8 @@ pub struct AppSettings {
     #[serde(default)]
     pub auto_download_updates: bool,
     pub diagnostics_retention_days: u16,
+    #[serde(default = "default_app_log_retention_days")]
+    pub app_log_retention_days: u16,
     /// Runtime overlay from the independent user-rules store; never serialized
     /// into settings.json or included in the public settings API.
     #[serde(skip)]
@@ -136,6 +140,7 @@ impl Default for AppSettings {
             locale: "zh-CN".to_string(),
             theme: "system".to_string(),
             launch_at_login: false,
+            silent_startup: false,
             restore_last_session: true,
             show_global_traffic: true,
             network_mode: NetworkMode::Manual,
@@ -147,6 +152,7 @@ impl Default for AppSettings {
             update_source: crate::app_update::UpdateSource::Auto,
             auto_download_updates: false,
             diagnostics_retention_days: 7,
+            app_log_retention_days: default_app_log_retention_days(),
             user_rules: Vec::new(),
         }
     }
@@ -159,6 +165,8 @@ pub struct PublicAppSettings {
     pub locale: String,
     pub theme: String,
     pub launch_at_login: bool,
+    #[serde(default)]
+    pub silent_startup: bool,
     #[serde(default = "default_true")]
     pub restore_last_session: bool,
     pub show_global_traffic: bool,
@@ -173,6 +181,8 @@ pub struct PublicAppSettings {
     #[serde(default)]
     pub auto_download_updates: bool,
     pub diagnostics_retention_days: u16,
+    #[serde(default = "default_app_log_retention_days")]
+    pub app_log_retention_days: u16,
 }
 
 impl From<&AppSettings> for PublicAppSettings {
@@ -182,6 +192,7 @@ impl From<&AppSettings> for PublicAppSettings {
             locale: value.locale.clone(),
             theme: value.theme.clone(),
             launch_at_login: value.launch_at_login,
+            silent_startup: value.silent_startup,
             restore_last_session: value.restore_last_session,
             show_global_traffic: value.show_global_traffic,
             network_mode: value.network_mode,
@@ -192,6 +203,7 @@ impl From<&AppSettings> for PublicAppSettings {
             update_source: value.update_source,
             auto_download_updates: value.auto_download_updates,
             diagnostics_retention_days: value.diagnostics_retention_days,
+            app_log_retention_days: value.app_log_retention_days,
         }
     }
 }
@@ -203,6 +215,7 @@ impl PublicAppSettings {
             locale: self.locale,
             theme: self.theme,
             launch_at_login: self.launch_at_login,
+            silent_startup: self.silent_startup,
             restore_last_session: self.restore_last_session,
             show_global_traffic: self.show_global_traffic,
             network_mode: self.network_mode,
@@ -214,9 +227,14 @@ impl PublicAppSettings {
             update_source: self.update_source,
             auto_download_updates: self.auto_download_updates,
             diagnostics_retention_days: self.diagnostics_retention_days,
+            app_log_retention_days: self.app_log_retention_days,
             user_rules: current.user_rules.clone(),
         }
     }
+}
+
+pub(crate) fn default_app_log_retention_days() -> u16 {
+    3
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -436,6 +454,7 @@ mod tests {
         assert!(settings.auto_check_updates);
         assert!(settings.restore_last_session);
         assert!(!settings.launch_at_login);
+        assert_eq!(settings.app_log_retention_days, 3);
     }
 
     #[test]
@@ -457,6 +476,25 @@ mod tests {
         .expect("legacy public settings");
         assert!(settings.auto_check_updates);
         assert!(settings.restore_last_session);
+    }
+
+    #[test]
+    fn log_retention_roundtrips_without_changing_other_preferences() {
+        let current = AppSettings::default();
+        let mut public = super::PublicAppSettings::from(&current);
+        public.app_log_retention_days = 14;
+        let merged = public.merge_secret(&current);
+        assert_eq!(merged.app_log_retention_days, 14);
+        assert_eq!(merged.diagnostics_retention_days, 7);
+        assert_eq!(merged.network_mode, current.network_mode);
+        assert_eq!(merged.controller_secret, current.controller_secret);
+        let json = serde_json::to_string(&merged).unwrap();
+        assert_eq!(
+            serde_json::from_str::<AppSettings>(&json)
+                .unwrap()
+                .app_log_retention_days,
+            14
+        );
     }
 
     #[test]

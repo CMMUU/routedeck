@@ -157,7 +157,7 @@ pub fn attach(config: &Path, dir: &Path, route: &RouteDocument, expected: &str) 
         || doc.get("model_provider").and_then(Item::as_str) == Some(PROVIDER)
     {
         return Err(AppError::Conflict(
-            "Codex 已有同名提供方（兼容标识 routedeck），未覆盖".into(),
+            "Codex 中的本地路由提供方标识已被其他配置占用，未覆盖".into(),
         ));
     }
     if doc.get("model_providers").is_some_and(|v| !v.is_table()) {

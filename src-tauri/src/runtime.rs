@@ -769,6 +769,22 @@ where
 }
 
 fn push_log(logs: &Arc<Mutex<VecDeque<RuntimeLog>>>, level: &str, source: &str, message: String) {
+    if source != "runtime" {
+        if let Some(summary) = crate::app_log::core_network_summary(level, &message) {
+            crate::app_log::record(
+                if level == "error" { 2 } else { 1 },
+                crate::app_log::Area::CoreNetwork,
+                summary,
+            );
+        }
+    }
+    if source == "runtime" {
+        crate::app_log::record(
+            if level == "error" { 2 } else { 0 },
+            crate::app_log::Area::Runtime,
+            &message,
+        );
+    }
     if let Ok(mut lines) = logs.lock() {
         lines.push_back(RuntimeLog {
             timestamp: Utc::now(),

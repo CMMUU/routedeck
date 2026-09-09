@@ -16,7 +16,8 @@ import sync_gitee as sync
 HERE = Path(__file__).resolve().parent
 
 
-def metadata(private=False, owner="cmmuu", repo="routedeck"):
+def metadata(private=False, owner="cmmuu", repo=None):
+    repo = repo or ("serylane" if owner == "CMMUU" else "routedeck")
     return {"full_name": f"{owner}/{repo}", "owner": {"login": owner}, "private": private,
             "path": repo, "html_url": f"https://gitee.com/{owner}/{repo}"}
 
@@ -67,6 +68,12 @@ class SyncTests(unittest.TestCase):
 
     def test_repository_scope_is_exactly_the_renamed_project(self):
         self.assertEqual(sync.REPOS, {"routedeck"})
+        self.assertEqual(sync.SOURCE_REPOS, {"routedeck": "serylane"})
+        job = sync.Sync("routedeck", None, None, self.fixture())
+        self.assertEqual(job.source_path, "/repos/CMMUU/serylane")
+        self.assertEqual(job.target_path, "/repos/cmmuu/routedeck")
+        with self.assertRaisesRegex(sync.SyncError, "GitHub source"):
+            sync.validate_pair("routedeck", metadata(False, "CMMUU", "routedeck"), metadata())
         for repo in ("mihomo-codex", "RouteDeck", "other", "../routedeck"):
             with self.subTest(repo=repo), self.assertRaisesRegex(sync.SyncError, "Unsupported repository"):
                 sync.Sync(repo, None, None, self.fixture())
@@ -78,6 +85,42 @@ class SyncTests(unittest.TestCase):
             self.assertEqual(sync.git_run("routedeck", "ls-remote", "https://gitee.com/cmmuu/routedeck.git"), "verified refs")
             self.assertEqual(run.call_count, 2)
             self.assertIn("http.version=HTTP/1.1", run.call_args.args[0])
+
+    def test_display_name_sync_only_patches_name_and_is_idempotent(self):
+        writes = []
+        target = {**metadata(), "id": 50078322, "name": "RouteDeck"}
+        def request(path, method="GET", data=None):
+            if path == "/user":
+                return {"login": "cmmuu"}
+            self.assertEqual(path, "/repos/cmmuu/routedeck")
+            if method == "PATCH":
+                writes.append(data.copy())
+                target.update(data)
+            return target.copy()
+        job = sync.Sync("routedeck", SimpleNamespace(request=lambda path: metadata(owner="CMMUU")),
+                        SimpleNamespace(request=request), self.fixture())
+        job.sync_display_name()
+        self.assertEqual(writes, [{"name": "Serylane"}])
+        self.assertEqual(target["path"], "routedeck")
+        job.sync_display_name()
+        self.assertEqual(len(writes), 1)
+
+    def test_name_sync_rejects_missing_identity_and_unconfirmed_change(self):
+        for target in ({**metadata(), "name": "RouteDeck"},
+                       {**metadata(), "id": 50078322, "name": "RouteDeck"}):
+            ge = SimpleNamespace(request=lambda *args: {})
+            job = sync.Sync("routedeck", None, ge, self.fixture())
+            with patch.object(job, "guard", return_value=target), patch.object(ge, "request") as request:
+                with self.assertRaises(sync.SyncError):
+                    job.sync_display_name()
+                self.assertEqual(request.call_count, 1 if target.get("id") else 0)
+
+    def test_display_name_preview_performs_no_writes(self):
+        job = sync.Sync("routedeck", None, None, self.fixture())
+        with patch.object(job, "guard"), patch.object(job, "sync_display_name") as rename, patch.object(job, "sync_refs") as refs:
+            job.run("refs", False, sync_display_name=True)
+            rename.assert_not_called()
+            refs.assert_not_called()
 
     def test_git_push_and_auth_failures_are_not_retried_or_exposed(self):
         for operation, stderr, expected in (("push", "TLS connection reset secret-token", "transient network"),
@@ -135,7 +178,8 @@ class SyncTests(unittest.TestCase):
         environment = {"SYNC_REPO": "routedeck", "GITHUB_TOKEN": "offline-gh", "GITEE_TOKEN": "offline-ge"}
         for host, owner, username, token in (("github.com", "CMMUU", "x-access-token", "offline-gh"),
                                              ("gitee.com", "cmmuu", "cmmuu", "offline-ge")):
-            for path in (f"{owner}/routedeck.git", f"{owner}/mihomo-codex.git", f"{owner}/other.git",
+            allowed = f"{owner}/{'serylane' if host == 'github.com' else 'routedeck'}.git"
+            for path in (allowed, f"{owner}/routedeck.git", f"{owner}/mihomo-codex.git", f"{owner}/other.git",
                          "other/routedeck.git", f"{owner}/routedeck.git/other"):
                 with self.subTest(host=host, path=path):
                     output = StringIO()
@@ -144,7 +188,7 @@ class SyncTests(unittest.TestCase):
                             patch.object(sync.sys, "argv", ["sync_gitee.py", "_git_credential", "get"]), \
                             patch.object(sync.sys, "stdin", fields), patch.object(sync.sys, "stdout", output):
                         sync.git_credential()
-                    expected = f"username={username}\npassword={token}\n\n" if path == f"{owner}/routedeck.git" else ""
+                    expected = f"username={username}\npassword={token}\n\n" if path == allowed else ""
                     self.assertEqual(output.getvalue(), expected)
 
     def test_private_to_public_is_blocked_before_git_or_release_writes(self):
@@ -184,7 +228,7 @@ class SyncTests(unittest.TestCase):
     def test_public_repository_does_not_bypass_authenticated_owner_preflight(self):
         class GH:
             def request(self, path):
-                return metadata(False, "CMMUU", "routedeck")
+                return metadata(False, "CMMUU", "serylane")
         class GE:
             identity = {"login": "other-owner"}
             def request(self, path):
@@ -212,7 +256,7 @@ class SyncTests(unittest.TestCase):
             Response(data),
         ])
         path = self.fixture() / "file.zip"
-        api.download("/repos/CMMUU/routedeck/releases/assets/1", path, len(data), hashlib.sha256(data).hexdigest())
+        api.download("/repos/CMMUU/serylane/releases/assets/1", path, len(data), hashlib.sha256(data).hexdigest())
         self.assertEqual(api.opener.requests[0].get_header("Authorization"), "Bearer offline-secret")
         self.assertIsNone(api.opener.requests[1].get_header("Authorization"))
         self.assertEqual(path.read_bytes(), data)
@@ -257,7 +301,7 @@ class SyncTests(unittest.TestCase):
                 if binary:
                     api.download("/asset", self.fixture() / "file.zip", 1, "a" * 64)
                 else:
-                    api.request("/repos/CMMUU/routedeck")
+                    api.request("/repos/CMMUU/serylane")
             self.assertNotIn("offline-secret", str(error.exception))
             self.assertNotIn("signed-url", str(error.exception))
 
@@ -336,7 +380,7 @@ class SyncTests(unittest.TestCase):
     def capacity_job(self, size=4, existing=(), max_asset=10, max_total=10, reserved=0):
         release = {"id": 1, "tag_name": "v1", "draft": False}
         source_asset = {"id": 7, "name": "package.zip", "size": size, "state": "uploaded",
-                        "url": "https://api.github.com/repos/CMMUU/routedeck/releases/assets/7"}
+                        "url": "https://api.github.com/repos/CMMUU/serylane/releases/assets/7"}
         class GH:
             def pages(self, path):
                 return [release] if path.endswith("/releases") else [source_asset]
@@ -410,7 +454,7 @@ class SyncTests(unittest.TestCase):
         api = sync.Api("github", "offline-secret")
         api.opener = Opener([])
         with self.assertRaisesRegex(sync.SyncError, "GitHub writes"):
-            api.request("/repos/CMMUU/routedeck/releases", "DELETE")
+            api.request("/repos/CMMUU/serylane/releases", "DELETE")
         self.assertEqual(api.opener.requests, [])
 
     def test_ref_sync_copies_all_heads_and_tags_without_force_or_remote_deletion(self):
@@ -442,7 +486,7 @@ class SyncTests(unittest.TestCase):
             def pages(self, path):
                 return [{"id": 7, "name": "package.zip", "state": "uploaded", "size": 4,
                          "digest": "sha256:" + digest,
-                         "url": "https://api.github.com/repos/CMMUU/routedeck/releases/assets/7"}]
+                         "url": "https://api.github.com/repos/CMMUU/serylane/releases/assets/7"}]
             def download(self, path, destination, expected_size, expected_sha):
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(data)

@@ -12,6 +12,8 @@ pub fn is_subscription_metadata_node_name(name: &str) -> bool {
         "下次重置",
         "套餐到期",
         "订阅到期",
+        "建议：感到卡顿",
+        "建议:感到卡顿",
         "到期时间",
         "官网:",
         "官网：",
@@ -222,6 +224,7 @@ proxy-groups:
             "套餐到期：2026-09-17",
             "放丢失官网:https://example.com",
             "Traffic Remaining: 20 GB",
+            "建议：感到卡顿请切换到专线节点",
         ] {
             assert!(is_subscription_metadata_node_name(name), "{name}");
         }

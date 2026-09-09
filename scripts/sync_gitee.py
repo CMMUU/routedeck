@@ -20,7 +20,9 @@ from urllib.parse import urlencode, urljoin, urlsplit
 from urllib.request import Request, HTTPRedirectHandler, build_opener
 import uuid
 
-REPOS = {"routedeck"}
+# Destination slug stays stable for already-installed updater clients.
+SOURCE_REPOS = {"routedeck": "serylane"}
+REPOS = set(SOURCE_REPOS)
 GH_OWNER, GE_OWNER = "CMMUU", "cmmuu"
 GH_API, GE_API = "https://api.github.com", "https://gitee.com/api/v5"
 MAX_JSON, MAX_ASSET = 8 * 1024 * 1024, 512 * 1024 * 1024
@@ -117,7 +119,7 @@ def validate_pair(repo, source, target):
         if (str(info.get("owner", {}).get("login", "")).casefold() != owner.casefold()
                 or type(info.get("private")) is not bool):
             raise SyncError("Repository owner, name or visibility could not be confirmed")
-    if str(source.get("full_name", "")).casefold() != f"{GH_OWNER}/{repo}".casefold():
+    if str(source.get("full_name", "")).casefold() != f"{GH_OWNER}/{SOURCE_REPOS[repo]}".casefold():
         raise SyncError("GitHub source repository does not match the requested scope")
     target_url = f"https://gitee.com/{GE_OWNER}/{repo}".casefold()
     if (str(target.get("path", "")).casefold() != repo.casefold()
@@ -345,7 +347,8 @@ def git_credential():
     repo = os.environ.get("SYNC_REPO", "")
     host, path = fields.get("host"), fields.get("path", "").removesuffix(".git")
     owner = GH_OWNER if host == "github.com" else GE_OWNER
-    if repo not in REPOS or fields.get("protocol") != "https" or host not in {"github.com", "gitee.com"} or path.casefold() != f"{owner}/{repo}".casefold():
+    source_repo = SOURCE_REPOS.get(repo) if host == "github.com" else repo
+    if repo not in REPOS or fields.get("protocol") != "https" or host not in {"github.com", "gitee.com"} or path.casefold() != f"{owner}/{source_repo}".casefold():
         return
     token = os.environ.get("GITHUB_TOKEN" if host == "github.com" else "GITEE_TOKEN", "")
     if token and sys.argv[-1] == "get":
@@ -401,7 +404,7 @@ class Sync:
         self.repo, self.gh, self.ge, self.work = repo, github, gitee, Path(work)
         if repo not in REPOS:
             raise SyncError("Unsupported repository")
-        self.source_path = f"/repos/{GH_OWNER}/{repo}"
+        self.source_path = f"/repos/{GH_OWNER}/{SOURCE_REPOS[repo]}"
         self.target_path = f"/repos/{GE_OWNER}/{repo}"
         self.source = None
         self.max_asset_bytes, self.max_total_bytes = max_asset_bytes, max_total_bytes
@@ -426,7 +429,7 @@ class Sync:
         self.guard()
         self.work.mkdir(parents=True, exist_ok=True)
         bare = self.work / (self.repo + ".git")
-        source_url = f"https://github.com/{GH_OWNER}/{self.repo}.git"
+        source_url = f"https://github.com/{GH_OWNER}/{SOURCE_REPOS[self.repo]}.git"
         if bare.exists():
             if (bare.is_symlink() or git_run(self.repo, "--git-dir", str(bare), "rev-parse", "--is-bare-repository") != "true"
                     or git_run(self.repo, "--git-dir", str(bare), "remote", "get-url", "origin") != source_url):
@@ -453,6 +456,21 @@ class Sync:
                 raise push_error
             raise SyncError("Gitee branches or tags did not match the source after push")
         return bare
+
+    def sync_display_name(self):
+        # Renaming the URL would strand installed clients. Only the visible
+        # name changes; owner/path/privacy and the repository ID must survive.
+        target = self.guard()
+        if target.get("name") == "Serylane":
+            return
+        target_id = target.get("id")
+        if type(target_id) is not int or target_id <= 0:
+            raise SyncError("Gitee repository identity is missing; no name change attempted")
+        self.ge.request(self.target_path, "PATCH", {"name": "Serylane"})
+        confirmed = self.guard()
+        if confirmed.get("id") != target_id or confirmed.get("name") != "Serylane":
+            raise SyncError("Gitee did not confirm the display name on the same repository")
+        print("Gitee display name verified: Serylane; updater-compatible URL unchanged", flush=True)
 
     def source_assets(self, release, enforce_quota=True):
         release_id = release.get("id")
@@ -791,12 +809,17 @@ class Sync:
             raise SyncError("Gitee release metadata did not match after synchronization")
         print(f"Synchronized {self.repo}: {tag}, {len(files)} attachment(s)", flush=True)
 
-    def run(self, scope, apply, release_tag=None, keep_latest_releases=None):
+    def run(self, scope, apply, release_tag=None, keep_latest_releases=None, sync_display_name=False):
         if keep_latest_releases is not None and (type(keep_latest_releases) is not int or not 1 <= keep_latest_releases <= 10):
             raise SyncError("Release retention must keep between 1 and 10 stable versions")
         if release_tag is not None and (scope != "all" or not re.fullmatch(r"v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", release_tag)):
             raise SyncError("A focused release sync requires --scope all and an exact stable release tag")
         self.guard()
+        if sync_display_name:
+            if apply:
+                self.sync_display_name()
+            else:
+                print("Preview: align Gitee display name with Serylane; do not change its URL")
         releases = self.gh.pages(self.source_path + "/releases") if scope == "all" else []
         selected = releases
         if release_tag is not None:
@@ -835,6 +858,8 @@ def main():
                         help="Bound concurrent attachment transfers; updater manifests always wait for every file to verify")
     parser.add_argument("--work-dir", type=Path, required=True)
     parser.add_argument("--apply", action="store_true", help="Explicitly authorize writes to the checked Gitee repository")
+    parser.add_argument("--sync-display-name", action="store_true",
+                        help="Align the Gitee display name with Serylane without changing its URL")
     args = parser.parse_args()
     gh_token, ge_token = os.environ.get("GITHUB_TOKEN"), os.environ.get("GITEE_TOKEN")
     if not gh_token or not ge_token:
@@ -846,7 +871,7 @@ def main():
     max_total = configured_bytes("GITEE_MAX_TOTAL_BYTES", GE_MAX_TOTAL, 100_000_000_000)
     reserved = configured_bytes("GITEE_OTHER_ATTACHMENT_BYTES", 0, max_total)
     Sync(args.repo, Api("github", gh_token), Api("gitee", ge_token, extra_hosts), args.work_dir,
-         max_asset, max_total, reserved, args.transfer_workers).run(args.scope, args.apply, args.release_tag, args.keep_latest_releases)
+         max_asset, max_total, reserved, args.transfer_workers).run(args.scope, args.apply, args.release_tag, args.keep_latest_releases, args.sync_display_name)
 
 
 if __name__ == "__main__":

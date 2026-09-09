@@ -105,6 +105,14 @@ pub fn build_effective_config_with_policy(
         Value::String(routing_mode.as_mihomo_mode().to_string()),
     );
     enable_selection_cache(root)?;
+    // Desktop long-lived CONNECT streams should not depend on OS-specific TCP
+    // idle defaults. Respect explicit subscription choices, including disable.
+    for (key, value) in [("keep-alive-idle", 30), ("keep-alive-interval", 15)] {
+        root.entry(Value::String(key.into()))
+            .or_insert(Value::Number(Number::from(value)));
+    }
+    root.entry(Value::String("disable-keep-alive".into()))
+        .or_insert(Value::Bool(false));
 
     root.remove(Value::String("tun".to_string()));
     let mut tun = Mapping::new();
@@ -211,17 +219,37 @@ fn normalize_proxy_groups(root: &mut Mapping, summary: &mut ProfileSummary) -> A
         if !matches!(group_type, Some("url-test" | "fallback")) {
             continue;
         }
+        let is_url_test = group_type == Some("url-test");
         automatic_groups += 1;
-        insert(
-            group,
-            "url",
-            Value::String("https://www.gstatic.com/generate_204".to_string()),
-        );
-        insert(group, "expected-status", Value::Number(Number::from(204)));
-        insert(group, "interval", Value::Number(Number::from(300)));
-        insert(group, "timeout", Value::Number(Number::from(8_000)));
-        insert(group, "lazy", Value::Bool(false));
-        insert(group, "max-failed-times", Value::Number(Number::from(2)));
+        let url_key = Value::String("url".into());
+        // Subscription-specific probe targets/statuses may be essential on a
+        // different network. Fill missing defaults, never replace valid choices.
+        if !group.contains_key(&url_key) {
+            group.insert(
+                url_key,
+                Value::String("https://www.gstatic.com/generate_204".into()),
+            );
+            group
+                .entry(Value::String("expected-status".into()))
+                .or_insert(Value::Number(Number::from(204)));
+        }
+        for (key, value) in [
+            ("interval", 300),
+            ("timeout", 8_000),
+            ("max-failed-times", 2),
+        ] {
+            group
+                .entry(Value::String(key.into()))
+                .or_insert(Value::Number(Number::from(value)));
+        }
+        if is_url_test {
+            group
+                .entry(Value::String("tolerance".into()))
+                .or_insert(Value::Number(Number::from(150)));
+        }
+        group
+            .entry(Value::String("lazy".into()))
+            .or_insert(Value::Bool(false));
     }
 
     if !metadata_nodes.is_empty() {
@@ -232,7 +260,7 @@ fn normalize_proxy_groups(root: &mut Mapping, summary: &mut ProfileSummary) -> A
     }
     if automatic_groups > 0 {
         summary.warnings.push(format!(
-            "已将 {automatic_groups} 个自动代理组统一为 HTTPS 204 健康检查"
+            "已为 {automatic_groups} 个自动代理组补齐健康检查默认值；保留订阅自定义检测参数"
         ));
     }
     Ok(())
@@ -486,6 +514,25 @@ rules:
     }
 
     #[test]
+    fn tcp_keepalive_defaults_preserve_explicit_subscription_choices() {
+        let effective =
+            build_effective_config(SOURCE, &AppSettings::default(), RoutingMode::Rule).unwrap();
+        let document: Value = serde_yaml::from_str(&effective.yaml).unwrap();
+        assert_eq!(document["keep-alive-idle"].as_i64(), Some(30));
+        assert_eq!(document["keep-alive-interval"].as_i64(), Some(15));
+        assert_eq!(document["disable-keep-alive"].as_bool(), Some(false));
+        let source = format!(
+            "{SOURCE}\nkeep-alive-idle: 45\nkeep-alive-interval: 20\ndisable-keep-alive: true\n"
+        );
+        let effective =
+            build_effective_config(&source, &AppSettings::default(), RoutingMode::Rule).unwrap();
+        let document: Value = serde_yaml::from_str(&effective.yaml).unwrap();
+        assert_eq!(document["keep-alive-idle"].as_i64(), Some(45));
+        assert_eq!(document["keep-alive-interval"].as_i64(), Some(20));
+        assert_eq!(document["disable-keep-alive"].as_bool(), Some(true));
+    }
+
+    #[test]
     fn remembers_api_selections_in_every_network_mode() {
         for network_mode in [
             NetworkMode::Manual,
@@ -665,7 +712,7 @@ rules:
     }
 
     #[test]
-    fn filters_metadata_nodes_and_hardens_automatic_group_checks() {
+    fn filters_metadata_nodes_without_overriding_subscription_probes() {
         let source = r#"
 proxies:
   - name: 剩余流量：15.61 GB
@@ -681,6 +728,8 @@ proxy-groups:
     type: url-test
     proxies: [剩余流量：15.61 GB, node-a]
     url: http://www.gstatic.com/generate_204
+    expected-status: 200
+    tolerance: 80
 rules:
   - MATCH,AUTO
 "#;
@@ -710,13 +759,13 @@ rules:
             group
                 .get(Value::String("url".to_string()))
                 .and_then(Value::as_str),
-            Some("https://www.gstatic.com/generate_204")
+            Some("http://www.gstatic.com/generate_204")
         );
         assert_eq!(
             group
                 .get(Value::String("expected-status".to_string()))
                 .and_then(Value::as_u64),
-            Some(204)
+            Some(200)
         );
         assert_eq!(
             group

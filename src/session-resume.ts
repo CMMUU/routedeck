@@ -11,7 +11,7 @@ export function sessionResumePresentation(status: SessionResumeStatus | null) {
   };
 }
 
-export function sessionResumeHelp(launchAtLogin: boolean, restoreLastSession: boolean) {
+export function sessionResumeHelp(launchAtLogin: boolean, restoreLastSession: boolean, silentStartup = false) {
   if (!restoreLastSession) return "恢复已关闭：打开应用时不会自动启动代理核心。";
-  return `${launchAtLogin ? "登录后自动打开应用并恢复" : "未开启登录时启动：重启电脑后，手动打开应用才会恢复"}上次运行状态。上次已停止则保持停止；运行中则使用原模式与选用配置。TUN 权限不足或其他系统代理占用时暂停恢复，不会自动接入 Codex 或启动其他程序。`;
+  return `${launchAtLogin ? (silentStartup ? "登录后在托盘后台恢复" : "登录后自动打开应用并恢复") : "未开启登录时启动：重启电脑后，手动打开应用才会恢复"}上次运行状态。上次已停止则保持停止；运行中则使用原模式与选用配置。TUN 权限不足或其他系统代理占用时暂停恢复，不会自动接入 Codex 或启动其他程序。`;
 }

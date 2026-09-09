@@ -2,7 +2,7 @@ use std::ffi::CStr;
 
 pub const LABEL: &str = "com.cmmuu.mihomodesktop.tun-helper";
 pub const PLIST_NAME: &CStr = c"com.cmmuu.mihomodesktop.tun-helper.plist";
-pub const APP_BINARY_NAME: &str = "routedeck";
+pub const APP_BINARY_NAME: &str = "serylane";
 pub const HELPER_BINARY_NAME: &str = "mihomo-tun-helper";
 pub const CORE_BINARY_NAME: &str = "mihomo";
 pub const PROTOCOL_VERSION: u32 = 1;

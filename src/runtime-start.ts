@@ -1,6 +1,6 @@
 import type { AppSettings, NetworkMode, RuntimeStatus } from "./types";
 
-export type RuntimeStartMode = "system_proxy" | "tun";
+export type RuntimeStartMode = "system_proxy" | "tun" | "previous";
 type StartResult =
   | { kind: "started" | "skipped" | "needs-profile" | "cancelled" }
   | { kind: "failed"; error: unknown; restored: boolean; rollbackError?: unknown };
@@ -33,6 +33,7 @@ export async function startRuntimeInMode(
   if (!initial.settings || !canStartRuntime(initial.runtime)) return { kind: "skipped" };
 
   let previousMode = initial.settings.networkMode;
+  let resolvedMode: NetworkMode = previousMode;
   let modeChanged = false;
   let result: StartResult = { kind: "skipped" };
   let refreshError: unknown;
@@ -45,12 +46,13 @@ export async function startRuntimeInMode(
     if (canStartRuntime(current)) {
       const settings = await context.readSettings();
       previousMode = settings.networkMode;
+      resolvedMode = mode === "previous" ? previousMode : mode;
       context.setSettings(settings);
-      if (mode === "tun" && !(await context.ensureTunReady())) {
+      if (resolvedMode === "tun" && !(await context.ensureTunReady())) {
         result = { kind: "cancelled" };
       } else {
-        if (mode !== previousMode) {
-          const settings = await context.setNetworkMode(mode);
+        if (resolvedMode !== previousMode) {
+          const settings = await context.setNetworkMode(resolvedMode);
           modeChanged = true;
           context.setSettings(settings);
         }
@@ -77,7 +79,7 @@ export async function startRuntimeInMode(
   }
   if (result.kind === "started" && !refreshError) {
     const observed = context.state();
-    if (observed.runtime?.phase !== "running" || observed.settings?.networkMode !== mode || (mode === "system_proxy" && !observed.systemProxyActive)) {
+    if (observed.runtime?.phase !== "running" || observed.settings?.networkMode !== resolvedMode || (resolvedMode === "system_proxy" && !observed.systemProxyActive)) {
       // The accepted start may already have exited, or external proxy settings
       // may have changed. Do not stop/restart an existing session to fix this.
       result = { kind: "failed", restored: false, error: new Error("启动后未确认核心运行或系统代理接管状态，请刷新核对；未自动停止或重新启动代理") };

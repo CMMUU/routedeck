@@ -1,6 +1,6 @@
 #[cfg(target_os = "macos")]
 fn main() {
-    routedeck_lib::tun_service::daemon::run()
+    serylane_lib::tun_service::daemon::run()
 }
 
 #[cfg(windows)]

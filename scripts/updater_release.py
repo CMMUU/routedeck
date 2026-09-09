@@ -9,15 +9,16 @@ import shutil
 import subprocess
 
 
-def updater_names(version):
+def updater_names(version, product_name="RouteDeck"):
     prefix = f"RouteDeck_{version}"
+    source_prefix = f"{product_name}_{version}"
     return {
-        "macos-aarch64": ("darwin-aarch64", "RouteDeck.app.tar.gz", f"{prefix}_aarch64.app.tar.gz"),
-        "macos-x64": ("darwin-x86_64", "RouteDeck.app.tar.gz", f"{prefix}_x64.app.tar.gz"),
-        "windows-x64": ("windows-x86_64", f"{prefix}_x64-setup.exe", f"{prefix}_x64-setup.exe"),
-        "windows-arm64": ("windows-aarch64", f"{prefix}_arm64-setup.exe", f"{prefix}_arm64-setup.exe"),
-        "linux-x64": ("linux-x86_64", f"{prefix}_amd64.AppImage", f"{prefix}_amd64.AppImage"),
-        "linux-arm64": ("linux-aarch64", f"{prefix}_aarch64.AppImage", f"{prefix}_aarch64.AppImage"),
+        "macos-aarch64": ("darwin-aarch64", f"{product_name}.app.tar.gz", f"{prefix}_aarch64.app.tar.gz"),
+        "macos-x64": ("darwin-x86_64", f"{product_name}.app.tar.gz", f"{prefix}_x64.app.tar.gz"),
+        "windows-x64": ("windows-x86_64", f"{source_prefix}_x64-setup.exe", f"{prefix}_x64-setup.exe"),
+        "windows-arm64": ("windows-aarch64", f"{source_prefix}_arm64-setup.exe", f"{prefix}_arm64-setup.exe"),
+        "linux-x64": ("linux-x86_64", f"{source_prefix}_amd64.AppImage", f"{prefix}_amd64.AppImage"),
+        "linux-arm64": ("linux-aarch64", f"{source_prefix}_aarch64.AppImage", f"{prefix}_aarch64.AppImage"),
     }
 
 
@@ -51,13 +52,20 @@ def stage_updaters(root, artifacts, output, version, notes, verify=verify_signat
         published_at = datetime.datetime.fromisoformat(stamp.stdout.strip()).astimezone(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
     platforms = {}
     staged = []
-    for folder, (target, source_name, name) in updater_names(version).items():
+    product_name = config.get("productName", "RouteDeck")
+    if product_name not in {"RouteDeck", "Serylane"}:
+        raise ValueError("Unrecognized package product name")
+    for folder, (target, source_name, name) in updater_names(version, product_name).items():
         package = one_file(artifacts / folder, source_name)
         signature = one_file(artifacts / folder, source_name + ".sig")
         if signature.stat().st_size > 4096:
             raise ValueError("Updater signature is too large")
         verify(root, package, signature)
-        for source, destination_name in [(package, name), (signature, name + ".sig")]:
+        public_name = name.replace("RouteDeck_", product_name + "_", 1)
+        copies = [(package, name), (signature, name + ".sig")]
+        if public_name != name:
+            copies += [(package, public_name), (signature, public_name + ".sig")]
+        for source, destination_name in copies:
             destination = output / destination_name
             if destination.exists() and destination.read_bytes() != source.read_bytes():
                 raise ValueError(f"Updater conflicts with installer: {destination_name}")
@@ -71,17 +79,28 @@ def stage_updaters(root, artifacts, output, version, notes, verify=verify_signat
         if target.startswith("windows-"):
             platforms[target + "-nsis"] = platforms[target].copy()
             msi_name = name.replace("-setup.exe", "_en-US.msi")
-            msi = one_file(artifacts / folder, msi_name)
-            msi_signature = one_file(artifacts / folder, msi_name + ".sig")
+            msi_source_name = source_name.replace("-setup.exe", "_en-US.msi")
+            msi = one_file(artifacts / folder, msi_source_name)
+            msi_signature = one_file(artifacts / folder, msi_source_name + ".sig")
             if msi_signature.stat().st_size > 4096:
                 raise ValueError("Updater signature is too large")
             verify(root, msi, msi_signature)
-            # MSI is already included in the ordinary installer set.
+            # The public MSI is in the installer set; legacy updater names are
+            # strict compatibility aliases of the same signed bytes.
+            if (output / msi_name).exists() and (output / msi_name).read_bytes() != msi.read_bytes():
+                raise ValueError("MSI alias conflicts with installer")
+            shutil.copyfile(msi, output / msi_name)
             shutil.copyfile(msi_signature, output / (msi_name + ".sig"))
+            if msi_source_name != msi_name:
+                shutil.copyfile(msi_signature, output / (msi_source_name + ".sig"))
+                staged.append(output / (msi_source_name + ".sig"))
             with msi.open("rb") as stream:
                 digest = hashlib.file_digest(stream, "sha256").hexdigest()
             platforms[target + "-msi"] = {"name": msi_name, "signature": msi_signature.read_text(encoding="utf-8").strip(), "size": msi.stat().st_size, "sha256": digest}
-            staged.append(output / (msi_name + ".sig"))
+            staged.extend([output / msi_name, output / (msi_name + ".sig")])
+    # Do not rewrite these URLs to the new repository slug: <= 0.7.6 clients
+    # validate the exact legacy URL. GitHub redirects it to CMMUU/serylane.
+    # The public installers and links use Serylane; these are signed-byte aliases.
     for manifest_name, base in [("latest.json", "https://github.com/CMMUU/routedeck"), ("latest-gitee.json", "https://gitee.com/cmmuu/routedeck")]:
         manifest = {"version": version, "notes": notes, "pub_date": published_at, "platforms": {}}
         for target, data in platforms.items():

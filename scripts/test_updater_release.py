@@ -74,3 +74,23 @@ class UpdaterReleaseTests(unittest.TestCase):
         self.config["bundle"]["createUpdaterArtifacts"] = False
         self.write_config()
         self.assertEqual(self.prepare(), [])
+
+    def test_serylane_packages_keep_byte_identical_signed_legacy_aliases(self):
+        self.config["productName"] = "Serylane"
+        self.write_config()
+        for folder in self.artifacts.iterdir():
+            for asset in list(folder.iterdir()):
+                asset.rename(asset.with_name(asset.name.replace("RouteDeck", "Serylane", 1)))
+        self.prepare()
+        manifest = json.loads((self.output / "latest.json").read_text())
+        for target, data in manifest["platforms"].items():
+            legacy = data["url"].rsplit("/", 1)[-1]
+            public = legacy.replace("RouteDeck", "Serylane", 1)
+            if target.endswith("-msi"):
+                # The ordinary package collector provides the public MSI.
+                arch = "arm64" if "aarch64" in target else "x64"
+                public_bytes = (self.artifacts / f"windows-{arch}" / public).read_bytes()
+            else:
+                public_bytes = (self.output / public).read_bytes()
+            self.assertEqual((self.output / legacy).read_bytes(), public_bytes)
+            self.assertEqual((self.output / (legacy + ".sig")).read_bytes(), (self.output / (public + ".sig")).read_bytes())

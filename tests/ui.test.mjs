@@ -56,13 +56,13 @@ function runtimeFixture(mode = "manual", options = {}) {
   return { calls, state, start: (intent = "system_proxy") => startRuntimeInMode(intent, context) };
 }
 
-test("main Start explicitly requests system proxy and exposes that intent accessibly", async () => {
-  assert.match(main, /#global-start.*addEventListener\("click", \(\) => void startRuntime\("system_proxy"\)\)/);
-  assert.match(main, /id="global-start"[^>]*aria-label="启动并开启系统代理"/);
+test("main Start requests the last saved scheme accessibly", async () => {
+  assert.match(main, /#global-start.*addEventListener\("click", \(\) => void startRuntime\("previous"\)\)/);
+  assert.match(main, /id="global-start"[^>]*aria-label="按上次方案启动"/);
   const f = runtimeFixture();
-  assert.equal((await f.start()).kind, "started");
-  assert.deepEqual(f.calls, ["read", "mode:system_proxy", "start:system_proxy", "refresh"]);
-  assert.equal(f.state.settings.networkMode, "system_proxy");
+  assert.equal((await f.start("previous")).kind, "started");
+  assert.deepEqual(f.calls, ["read", "start:manual", "refresh"]);
+  assert.equal(f.state.settings.networkMode, "manual");
   assert.equal(f.state.busy, false);
 });
 
@@ -72,10 +72,13 @@ test("an existing system-proxy preference starts directly without rewriting mode
   assert.deepEqual(f.calls, ["read", "start:system_proxy", "refresh"]);
 });
 
-test("main Start overrides a stopped saved TUN mode without requesting TUN privileges", async () => {
+test("main Start restores saved TUN with permission preflight, not system proxy", async () => {
   const f = runtimeFixture("tun");
-  assert.equal((await f.start()).kind, "started");
-  assert.deepEqual(f.calls, ["read", "mode:system_proxy", "start:system_proxy", "refresh"]);
+  assert.equal((await f.start("previous")).kind, "started");
+  assert.deepEqual(f.calls, ["read", "tun-ready", "start:tun", "refresh"]);
+  const stale = runtimeFixture("system_proxy", { actualMode: "tun", tunReady: false });
+  assert.equal((await stale.start("previous")).kind, "cancelled");
+  assert.deepEqual(stale.calls, ["read", "tun-ready", "refresh"]);
 });
 
 test("startup uses the authoritative prior preference rather than a stale toolbar snapshot", async () => {

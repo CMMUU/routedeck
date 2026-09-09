@@ -1,3 +1,4 @@
+mod app_log;
 mod app_update;
 mod appearance;
 mod config;
@@ -16,6 +17,7 @@ mod profile_service;
 mod program_proxy;
 mod runtime;
 mod session_resume;
+mod startup;
 mod storage;
 mod subscription;
 mod traffic_monitor;
@@ -85,6 +87,13 @@ impl Drop for SubscriptionImportPermit<'_> {
 }
 
 fn dto(error: AppError) -> AppErrorDto {
+    // Arbitrary error text can contain subscription/configuration secrets.
+    // Network diagnostics log their separately sanitized, structured cause.
+    app_log::record(
+        2,
+        app_log::Area::App,
+        &format!("操作失败：{}（{}）", error.code(), error.stage()),
+    );
     error.dto()
 }
 
@@ -194,13 +203,16 @@ fn update_settings(
     appearance::native_theme(&settings.theme).map_err(dto)?;
     if !(1..=90).contains(&settings.diagnostics_retention_days) {
         return Err(dto(AppError::InvalidInput(
-            "日志保留天数必须在 1 到 90 之间".to_string(),
+            "诊断报告保留天数必须在 1 到 90 之间".to_string(),
         )));
     }
+    app_log::validate_retention_days(settings.app_log_retention_days).map_err(dto)?;
     let settings = settings.merge_secret(&current);
     // Saving restoration or appearance preferences is not consent to rewrite
     // the user's OS login registration. Only an actual checkbox change is.
-    if settings.launch_at_login != current.launch_at_login {
+    if settings.launch_at_login != current.launch_at_login
+        || (settings.launch_at_login && settings.silent_startup != current.silent_startup)
+    {
         let autostart = app.autolaunch();
         if settings.launch_at_login {
             autostart
@@ -213,6 +225,25 @@ fn update_settings(
         }
     }
     storage.save_settings(&settings).map_err(dto)?;
+    app_log::set_retention_days(settings.app_log_retention_days);
+    if startup::migrate_login_entry(&app, &settings).is_err() {
+        app_log::record(
+            1,
+            app_log::Area::Settings,
+            "设置已保存，但旧登录启动项迁移未完成；请核对系统启动应用列表",
+        );
+    }
+    app_log::record(
+        0,
+        app_log::Area::Settings,
+        &format!(
+            "设置已保存：模式={:?}；登录启动={}；静默={}；恢复={}",
+            settings.network_mode,
+            settings.launch_at_login,
+            settings.silent_startup,
+            settings.restore_last_session
+        ),
+    );
     if settings.restore_last_session != current.restore_last_session {
         app.state::<session_resume::SessionResumeManager>()
             .cancel_pending(&app);
@@ -377,6 +408,14 @@ async fn start_runtime_for_settings(
 ) -> Result<(), AppErrorDto> {
     let storage = AppStorage::from_app(app).map_err(dto)?;
     let effective = active_effective_config(app, settings).map_err(dto)?;
+    app_log::record(
+        0,
+        app_log::Area::Runtime,
+        &format!(
+            "准备启动：模式={:?}；本地端口={}；控制端口={}",
+            settings.network_mode, settings.mixed_port, settings.controller_port
+        ),
+    );
     runtime::validate_source(app, &effective.yaml).map_err(dto)?;
     app.state::<session_resume::SessionResumeManager>()
         .while_open(|| {
@@ -389,6 +428,11 @@ async fn start_runtime_for_settings(
         })
         .map_err(dto)?;
     finish_runtime_start(app, state, settings, automatic_proxy).await?;
+    app_log::record(
+        0,
+        app_log::Area::Runtime,
+        "核心启动验收通过；不代表 Codex 模型请求已验证",
+    );
     if app
         .state::<session_resume::SessionResumeManager>()
         .is_shutting_down()
@@ -415,10 +459,13 @@ async fn finish_runtime_start(
         return Err(dto(error));
     }
     if settings.network_mode == NetworkMode::SystemProxy {
-        if let Err(error) = network_safety::verify_local_proxy(settings).await {
-            let _ = state.stop(Some(app));
-            return Err(dto(error));
-        }
+        let report = match network_safety::verify_local_proxy(settings).await {
+            Ok(report) => report,
+            Err(error) => {
+                let _ = state.stop(Some(app));
+                return Err(dto(error));
+            }
+        };
         let proxy_result = app
             .state::<session_resume::SessionResumeManager>()
             .while_open(|| match automatic_proxy {
@@ -439,16 +486,10 @@ async fn finish_runtime_start(
             let _ = state.stop(Some(app));
             return Err(dto(error));
         }
-        match network_safety::verify_local_proxy(settings).await {
-            Ok(report) => {
-                let _ = app.emit("network-safety-report", &report);
-            }
-            Err(error) => {
-                let _ = platform::restore_system_proxy(app);
-                let _ = state.stop(Some(app));
-                return Err(dto(error));
-            }
-        }
+        // The explicit loopback proxy was just tested. Changing OS registration
+        // does not change that route; a second identical probe could tear down
+        // an already validated core on a single transient upstream failure.
+        let _ = app.emit("network-safety-report", &report);
     } else if settings.network_mode == NetworkMode::Tun {
         tokio::time::sleep(Duration::from_millis(900)).await;
         #[cfg(not(windows))]
@@ -621,6 +662,11 @@ async fn stop_runtime_by_user(app: &AppHandle) -> Result<RuntimeStatus, AppError
             // The state.json read/modify/write shares cleanup's transition lock.
             // Shutdown cannot read the old true intent and overwrite this Stop.
             storage.set_desired_running(false)?;
+            app_log::record(
+                0,
+                app_log::Area::Runtime,
+                "用户停止代理；下次启动应用时保持停止",
+            );
             let proxy_result = platform::restore_system_proxy(app);
             let status = state.stop(Some(app));
             storage.mark_clean_shutdown(proxy_result.is_ok() && status.is_ok())?;
@@ -634,6 +680,16 @@ async fn stop_runtime_by_user(app: &AppHandle) -> Result<RuntimeStatus, AppError
 #[tauri::command]
 fn runtime_logs(state: State<'_, MihomoRuntime>, limit: Option<usize>) -> Vec<RuntimeLog> {
     state.logs(limit.unwrap_or(300))
+}
+
+#[tauri::command]
+fn application_logs() -> Result<app_log::Snapshot, AppErrorDto> {
+    app_log::snapshot().map_err(|error| error.dto())
+}
+
+#[tauri::command]
+fn clear_application_logs() -> Result<(), AppErrorDto> {
+    app_log::clear().map_err(|error| error.dto())
 }
 
 #[tauri::command]
@@ -871,6 +927,11 @@ fn cleanup_app(app: &AppHandle) {
     if !resume.begin_shutdown() {
         return;
     }
+    app_log::record(
+        0,
+        app_log::Area::App,
+        "应用退出：清理本次代理接管，保留最后的运行意图与网络模式",
+    );
     app.state::<openai_stability::StabilityManager>().stop();
     let _ = app
         .state::<local_routing::LocalRoutingManager>()
@@ -902,13 +963,17 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            show_home_window(app);
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            if !args.iter().any(|arg| arg == startup::AUTOSTART_ARG) {
+                show_home_window(app);
+            }
         }))
-        .plugin(tauri_plugin_autostart::init(
-            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
-        ))
+        .plugin(
+            tauri_plugin_autostart::Builder::new()
+                .app_name("Serylane")
+                .arg(startup::AUTOSTART_ARG)
+                .build(),
+        )
         .manage(MihomoRuntime::default())
         .manage(session_resume::SessionResumeManager::default())
         .manage(app_update::AppUpdateManager::default())
@@ -922,6 +987,24 @@ pub fn run() {
         .setup(|app| {
             let storage = AppStorage::from_app(app.handle()).map_err(|error| error.to_string())?;
             let settings = storage.settings().map_err(|error| error.to_string())?;
+            app_log::initialize(storage.app_log_path(), settings.app_log_retention_days);
+            app_log::record(
+                0,
+                app_log::Area::App,
+                &format!(
+                    "Serylane {} 已启动（{} / {}）",
+                    env!("CARGO_PKG_VERSION"),
+                    std::env::consts::OS,
+                    std::env::consts::ARCH
+                ),
+            );
+            if startup::migrate_login_entry(app.handle(), &settings).is_err() {
+                app_log::record(
+                    1,
+                    app_log::Area::Settings,
+                    "登录启动项迁移失败；请在设置中重新保存登录启动选项",
+                );
+            }
             // Unknown legacy values should not prevent startup. Leave the stored
             // value untouched and use the system appearance until it is changed.
             app.set_theme(appearance::native_theme(&settings.theme).unwrap_or(None));
@@ -981,6 +1064,25 @@ pub fn run() {
                 .start(app.handle().clone());
             app.state::<session_resume::SessionResumeManager>()
                 .bootstrap(app.handle(), &settings, &persistent);
+            // The native window starts hidden to avoid a visible flash at login.
+            if startup::show_initial_window(&settings, &std::env::args().collect::<Vec<_>>()) {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                }
+            }
+            let pruning_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(60)).await;
+                    if pruning_app
+                        .state::<session_resume::SessionResumeManager>()
+                        .is_shutting_down()
+                    {
+                        break;
+                    }
+                    app_log::prune();
+                }
+            });
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -1031,6 +1133,8 @@ pub fn run() {
             start_active_profile,
             stop_mihomo,
             runtime_logs,
+            application_logs,
+            clear_application_logs,
             clear_runtime_logs,
             system_proxy_status,
             check_system_proxy_compatibility,

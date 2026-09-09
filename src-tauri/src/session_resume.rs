@@ -75,6 +75,7 @@ impl SessionResumeManager {
     }
 
     fn emit(&self, app: &AppHandle) {
+        crate::app_log::record(0, crate::app_log::Area::Restore, &self.snapshot().message);
         let _ = app.emit("session-resume-status", self.snapshot());
     }
 
@@ -253,17 +254,37 @@ async fn wait_for_manual_configuration<T>(
 
 async fn restore(app: AppHandle, plan: ResumePlan) {
     let manager = app.state::<SessionResumeManager>();
-    tokio::select! {
-        biased;
-        _ = manager.cancelled(plan.generation) => return,
-        _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+    // A Wi-Fi/DHCP delay at login is not a permanent failure. Retry only typed
+    // transient preflight errors, release the configuration permit between
+    // attempts, and recheck user intent/ownership before every new process.
+    for (attempt, delay) in [1, 5, 15, 30].into_iter().enumerate() {
+        if attempt > 0 {
+            manager.update(&app, plan.generation, ResumePhase::Pending,
+                format!("网络暂未就绪，{delay} 秒后重试恢复（{attempt}/3）；仍保留上次模式，可随时手动停止。"));
+        }
+        tokio::select! {
+            biased;
+            _ = manager.cancelled(plan.generation) => return,
+            _ = tokio::time::sleep(Duration::from_secs(delay)) => {}
+        }
+        if !restore_attempt(&app, &plan, attempt).await {
+            return;
+        }
     }
-    let result = restore_preflight(&app, &plan);
+}
+
+fn retry_restore(error: &crate::error::AppErrorDto, attempt: usize) -> bool {
+    attempt < 3 && error.code == "NETWORK_CHECK_FAILED" && error.retryable
+}
+
+async fn restore_attempt(app: &AppHandle, plan: &ResumePlan, attempt: usize) -> bool {
+    let manager = app.state::<SessionResumeManager>();
+    let result = restore_preflight(app, plan);
     let (settings, proxy_guard, _configuration) = match result {
         Ok(value) => value,
         Err(error) => {
             manager.update(
-                &app,
+                app,
                 plan.generation,
                 ResumePhase::Paused,
                 format!(
@@ -271,14 +292,14 @@ async fn restore(app: AppHandle, plan: ResumePlan) {
                     crate::runtime::redact(&error.to_string())
                 ),
             );
-            return;
+            return false;
         }
     };
     if !manager.current(plan.generation) {
-        return;
+        return false;
     }
     manager.update(
-        &app,
+        app,
         plan.generation,
         ResumePhase::Restoring,
         "正在恢复上次配置与网络模式；通过安全检查后才接入系统代理。".into(),
@@ -290,30 +311,40 @@ async fn restore(app: AppHandle, plan: ResumePlan) {
             // This restore owns the configuration permit, so no subsequent
             // manual start can have created the process being cleaned up here.
             manager.cleanup_transition(|| {
-                let _ = crate::platform::restore_system_proxy(&app);
-                let _ = runtime.stop(Some(&app));
+                let _ = crate::platform::restore_system_proxy(app);
+                let _ = runtime.stop(Some(app));
             });
-            return;
+            return false;
         }
-        result = crate::start_runtime_for_settings(&app, &runtime, &settings, proxy_guard.as_ref()) => result,
+        result = crate::start_runtime_for_settings(app, &runtime, &settings, proxy_guard.as_ref()) => result,
     };
     match result {
         Ok(()) if manager.current(plan.generation) => {
             // Already true; intentionally do not rewrite a possibly newer
             // manual stop intent from a late startup task.
             manager.update(
-                &app,
+                app,
                 plan.generation,
                 ResumePhase::Restored,
                 "已恢复上次运行模式与配置；不代表所有网站或模型长连接均已验证。".into(),
             );
         }
         Ok(()) => manager.cleanup_transition(|| {
-            let _ = crate::platform::restore_system_proxy(&app);
-            let _ = runtime.stop(Some(&app));
+            let _ = crate::platform::restore_system_proxy(app);
+            let _ = runtime.stop(Some(app));
         }),
+        Err(error) if manager.current(plan.generation) && retry_restore(&error, attempt) => {
+            // finish_runtime_start has already stopped the failed owned core.
+            // It has not enabled System Proxy on a failed connectivity report.
+            crate::app_log::record(
+                1,
+                crate::app_log::Area::Restore,
+                "临时联网预检失败，等待网络恢复后有限重试；未变更运行模式",
+            );
+            return true;
+        }
         Err(error) => manager.update(
-            &app,
+            app,
             plan.generation,
             ResumePhase::Paused,
             format!(
@@ -322,6 +353,7 @@ async fn restore(app: AppHandle, plan: ResumePlan) {
             ),
         ),
     }
+    false
 }
 
 type ResumePreflight = (
@@ -365,6 +397,30 @@ pub fn get_session_resume_status(state: State<'_, SessionResumeManager>) -> Sess
 mod tests {
     use super::*;
     use uuid::Uuid;
+
+    #[test]
+    fn login_retry_is_bounded_and_only_for_transient_network_preflight() {
+        let transient = AppError::NetworkPreflight {
+            message: "fixture".into(),
+            retryable: true,
+        }
+        .dto();
+        for attempt in 0..3 {
+            assert!(retry_restore(&transient, attempt));
+        }
+        assert!(!retry_restore(&transient, 3));
+        for error in [
+            AppError::NetworkPreflight {
+                message: "TLS".into(),
+                retryable: false,
+            },
+            AppError::Runtime("binary missing".into()),
+            AppError::Platform("not authorized".into()),
+            AppError::Conflict("new owner".into()),
+        ] {
+            assert!(!retry_restore(&error.dto(), 0));
+        }
+    }
 
     fn state() -> PersistentAppState {
         PersistentAppState {

@@ -6,6 +6,8 @@ import { subscriptionCardMarkup } from "./subscription-cards";
 import { subscriptionImportMarkup, describeSubscriptionImport } from "./subscription-import";
 import { NAV_ITEMS, navigationMarkup, type ViewName } from "./ui";
 import { preferencesMarkup } from "./settings-view";
+import { mountLogs } from "./log-view";
+import { installContinuousScrolling } from "./scrolling";
 import { sessionResumeHelp, sessionResumePresentation } from "./session-resume";
 import { canStartRuntime, startRuntimeInMode, type RuntimeStartMode } from "./runtime-start";
 import { api, errorMessage, revisionLabel } from "./api";
@@ -35,13 +37,15 @@ import type {
   OpenAiPolicyTask,
   ProfileDetails,
   ProfileRecord,
-  RuntimeLog,
   RuntimeStatus,
   SessionResumeStatus,
   SystemProxyStatus,
   SubscriptionOverview,
   TunHelperStatus,
 } from "./types";
+
+const continuousScrolling = installContinuousScrolling();
+window.addEventListener("pagehide", () => continuousScrolling.dispose(), { once: true });
 
 const sampleProfile = `mixed-port: 7890
 mode: rule
@@ -85,7 +89,6 @@ const store: {
   proxies: Record<string, unknown> | null;
   rules: Record<string, unknown> | null;
   connections: Record<string, unknown> | null;
-  logs: RuntimeLog[];
   openAiTask: OpenAiPolicyTask | null;
   nodeDetails: CurrentNodeDetails | null;
   networkSafety: NetworkSafetyReport | null;
@@ -106,7 +109,6 @@ const store: {
   proxies: null,
   rules: null,
   connections: null,
-  logs: [],
   openAiTask: null,
   nodeDetails: null,
   networkSafety: null,
@@ -126,6 +128,7 @@ const subscriptionRefreshing = new Set<string>();
 let openAiTaskFinishedAt: string | null = null;
 let networkModeSwitching = false;
 let runtimeActionInFlight = false;
+let stabilityActionInFlight = false;
 let runtimeMutationRevision = 0;
 let runtimeReadSequence = 0;
 let baseReadSequence = 0;
@@ -177,12 +180,12 @@ app.innerHTML = `
             <button class="button button-quiet" id="global-refresh">刷新</button>
           </div>
           <div class="header-runtime" aria-live="polite"><span class="application-status-dot" id="application-status-dot"></span><strong id="application-runtime-state">正在读取</strong></div>
-          <button class="button button-primary" id="global-start" title="启动核心并开启系统代理；TUN 请使用 TUN 模式按钮" aria-label="启动并开启系统代理" disabled>启动</button>
+          <button class="button button-primary" id="global-start" title="使用上次保存的网络模式与选用配置启动" aria-label="按上次方案启动" disabled>启动</button>
           <button class="button button-danger" id="global-stop" disabled>停止</button>
         </div>
       </header>
 
-      <div class="page-scroll" id="page-scroll">
+      <div class="page-scroll" id="page-scroll" tabindex="0" role="region" aria-labelledby="page-title">
       <aside class="session-resume-notice is-hidden" id="session-resume-notice" role="status" aria-live="polite"><strong id="session-resume-title"></strong><p id="session-resume-message"></p></aside>
       <section class="view-stack" id="overview-view">
         <div class="hero-grid">
@@ -436,13 +439,14 @@ function syncModalScrollLock() {
 }
 
 function restoreViewScroll(view: ViewName) {
+  continuousScrolling.cancel();
   const scroller = $("#page-scroll");
   if (!scroller) return;
   if (scrollRestoreFrame !== null) window.cancelAnimationFrame(scrollRestoreFrame);
   scrollRestoreFrame = window.requestAnimationFrame(() => {
     scrollRestoreFrame = null;
     if (store.view !== view) return;
-    scroller.scrollTop = viewScrollPositions[view] ?? 0;
+    scroller.scrollTo({ top: viewScrollPositions[view] ?? 0, behavior: "instant" });
   });
 }
 
@@ -678,7 +682,7 @@ function renderSessionResume() {
   $("#session-resume-title")!.textContent = presentation.title;
   $("#session-resume-message")!.textContent = presentation.message;
   $("#session-resume-status")!.textContent = sessionResumeStatus?.message ?? "";
-  if (store.settings) $("#session-resume-help")!.textContent = sessionResumeHelp(store.settings.launchAtLogin, store.settings.restoreLastSession);
+  if (store.settings) $("#session-resume-help")!.textContent = sessionResumeHelp(store.settings.launchAtLogin, store.settings.restoreLastSession, store.settings.silentStartup);
 }
 
 async function refreshSessionResume() {
@@ -955,6 +959,7 @@ function renderSettings() {
   ($("#settings-mixed-port") as HTMLInputElement).value = String(store.settings.mixedPort);
   ($("#settings-controller-port") as HTMLInputElement).value = String(store.settings.controllerPort);
   ($("#settings-launch") as HTMLInputElement).checked = store.settings.launchAtLogin;
+  ($("#settings-silent-startup") as HTMLInputElement).checked = store.settings.silentStartup;
   ($("#settings-restore-session") as HTMLInputElement).checked = store.settings.restoreLastSession;
   ($("#settings-global-traffic") as HTMLInputElement).checked =
     store.settings.showGlobalTraffic;
@@ -965,6 +970,7 @@ function renderSettings() {
   ($("#settings-retention") as HTMLInputElement).value = String(
     store.settings.diagnosticsRetentionDays,
   );
+  ($("#settings-app-log-retention") as HTMLInputElement).value = String(store.settings.appLogRetentionDays);
   renderGlobalTraffic();
   renderAppUpdate();
   renderTunHelper();
@@ -1286,7 +1292,7 @@ async function startRuntime(mode: RuntimeStartMode) {
   } else if (result.refreshError) {
     toast(`运行状态刷新失败，请点击刷新核对：${errorMessage(result.refreshError)}`, "error");
   } else if (result.kind === "started") {
-    toast(mode === "system_proxy" ? "Mihomo 已启动，系统代理已开启" : "Mihomo 已启动，TUN 模式已开启", "success");
+    toast(store.settings?.networkMode === "system_proxy" ? "Mihomo 已启动，系统代理已开启" : store.settings?.networkMode === "tun" ? "Mihomo 已启动，TUN 模式已开启" : "Mihomo 已启动，仅使用本地代理端口", "success");
   }
 }
 
@@ -1402,7 +1408,7 @@ async function ensureTunHelperReady(): Promise<boolean> {
       return false;
     }
     await action("", () => api.openTunHelperSettings());
-    toast("请在系统设置中批准 Serylane TUN Helper（安装名称 RouteDeck），然后再次开启 TUN", "error");
+    toast("请在系统设置中批准 Serylane TUN Helper，然后再次开启 TUN", "error");
     return false;
   }
   if (helper.state !== "ready") {
@@ -1726,6 +1732,7 @@ function renderOpenAiPolicy() {
         </div>
       </div>
       <div class="openai-policy-actions">
+        <button class="button button-quiet" data-openai-action="stability" aria-pressed="${Boolean(policy.stabilityEnabled)}" ${!policy.enabled || policy.selectedNodes.length < 2 || task?.running || stabilityActionInFlight ? "disabled" : ""}>${policy.stabilityEnabled ? "稳定优先：已开启" : "启用稳定优先"}</button>
         ${running
           ? '<button class="button button-danger" data-openai-action="cancel">停止检测</button>'
           : `<button class="button button-primary" data-openai-action="generate" ${anotherTaskRunning ? "disabled" : ""}>${anotherTaskRunning ? "其他订阅生成中" : policy.enabled ? "重新筛选 10 个" : "生成 10 个节点"}</button>`}
@@ -1743,11 +1750,12 @@ function renderOpenAiPolicy() {
     ` : ""}
     ${taskForActive && task?.phase === "failed" && task.error ? `<div class="openai-error">${escapeHtml(task.error)}</div>` : ""}
     <div class="openai-policy-stats">
-      <div><span>当前节点</span><strong>${escapeHtml(currentNode)}</strong></div>
+      <div><span>${runtimeGroup?.now ? "当前节点" : "候选首选（非运行状态）"}</span><strong>${escapeHtml(currentNode)}</strong></div>
       <div><span>自动维护</span><strong>${policy.autoMaintain ? "订阅更新后执行" : "仅手动执行"}</strong></div>
       <div><span>上次筛选</span><strong>${formatPolicyDate(policy.lastBenchmarkedAt)}</strong></div>
-      <div><span>故障策略</span><strong>按优先级自动切换</strong></div>
+      <div><span>故障策略</span><strong>${policy.stabilityEnabled ? "稳定优先 · 保持节点与故障冷却" : "基础 Fallback · 可能自动回切"}</strong></div>
     </div>
+    <p class="hint">稳定优先可独立用于系统代理或 TUN，无需开启本地路由或接入 Codex。基础探测不是模型请求验证；已断开的流无法无缝续接。</p>
   `;
 }
 
@@ -2022,23 +2030,7 @@ function renderConnections() {
 }
 
 async function refreshLogs() {
-  store.logs = await api.logs(500);
-  renderLogs();
-}
-
-function renderLogs() {
-  const container = $("#log-list");
-  if (!container) return;
-  if (!store.logs.length) {
-    container.className = "log-list empty-state";
-    container.textContent = "暂无日志";
-    return;
-  }
-  container.className = "log-list";
-  container.innerHTML = store.logs
-    .map((log) => `<div class="log-row level-${escapeHtml(log.level)}"><time>${escapeHtml(new Date(log.timestamp).toLocaleTimeString())}</time><span>${escapeHtml(log.source)}</span><p>${escapeHtml(log.message)}</p></div>`)
-    .join("");
-  container.scrollTop = container.scrollHeight;
+  await logsView.refresh();
 }
 
 async function runDiagnostics() {
@@ -2096,6 +2088,7 @@ async function runDiagnostics() {
     .join("");
 }
 
+const logsView = mountLogs($("#logs-view")!, { api, confirm: confirmAction });
 const programManager = mountProgramManager($("#programs-view")!, { api, confirm: confirmAction, error: errorMessage });
 const localRouting = mountLocalRouting($("#routing-view")!, { api, confirm: confirmAction, error: errorMessage });
 mountProxyCompatibility($("#proxy-compatibility-panel")!, api.systemProxyCompatibility, errorMessage);
@@ -2149,7 +2142,7 @@ $$<HTMLButtonElement>(".nav-item").forEach((button) =>
   button.addEventListener("click", () => navigate(button.dataset.view as ViewName)),
 );
 $("#global-refresh")!.addEventListener("click", () => void refreshBase());
-$("#global-start")!.addEventListener("click", () => void startRuntime("system_proxy"));
+$("#global-start")!.addEventListener("click", () => void startRuntime("previous"));
 $("#global-stop")!.addEventListener("click", () => void stopRuntime());
 $("#global-system-proxy")!.addEventListener("click", () =>
   toggleGlobalNetworkMode("system_proxy"),
@@ -2183,7 +2176,6 @@ $("#proxies-current-node")!.addEventListener("click", () =>
 );
 $("#rules-refresh")!.addEventListener("click", () => void refreshRules());
 $("#connections-refresh")!.addEventListener("click", () => void refreshConnections());
-$("#logs-refresh")!.addEventListener("click", () => void refreshLogs());
 $("#run-diagnostics")!.addEventListener("click", () => void runDiagnostics());
 
 $("#overview-go-subscriptions")!.addEventListener("click", () => navigate("subscriptions"));
@@ -2293,7 +2285,19 @@ $("#openai-policy-card")!.addEventListener("click", async (event) => {
   );
   const actionName = button?.dataset.openaiAction;
   if (!actionName || !store.activeProfile) return;
-  if (actionName === "generate") {
+  if (actionName === "stability") {
+    if (stabilityActionInFlight || store.openAiTask?.running) return;
+    const profile = store.activeProfile.profile;
+    if (!profile.activeRevisionId || !profile.openaiPolicy.enabled || profile.openaiPolicy.selectedNodes.length < 2) return;
+    const enabled = !profile.openaiPolicy.stabilityEnabled;
+    stabilityActionInFlight = true;
+    try {
+      if (!await confirmAction({ title: enabled ? "启用稳定优先？" : "恢复基础灾备？", message: "将保存并应用新的核心配置，请避开重要请求。稳定优先保持正常节点，连续失败后才切换并冷却；不会主动清空连接，不会接入 Codex 本地路由。", confirmLabel: "确认应用", returnFocus: button })) return;
+      await action("灾备策略已更新", () => api.setOpenAiStability(enabled, profile.id, profile.activeRevisionId!, true));
+      await refreshBase();
+      if (store.runtime?.phase === "running") await refreshProxies();
+    } finally { stabilityActionInFlight = false; renderOpenAiPolicy(); }
+  } else if (actionName === "generate") {
     await startOpenAiGeneration();
   } else if (actionName === "cancel") {
     await cancelOpenAiGeneration();
@@ -2378,10 +2382,6 @@ $("#connections-body")!.addEventListener("click", async (event) => {
   await refreshConnections();
 });
 
-$("#logs-clear")!.addEventListener("click", async () => {
-  await api.clearLogs();
-  await refreshLogs();
-});
 
 $("#tun-helper-install")!.addEventListener("click", async () => {
   const helper = await action("TUN Helper 已提交安装", () => api.installTunHelper());
@@ -2451,7 +2451,7 @@ $("#app-update-install")!.addEventListener("click", async (event) => {
   const version = store.appUpdate.latestVersion;
   const confirmed = await confirmAction({
     title: `安装 Serylane ${version}`,
-    message: "安装包已通过签名和 SHA-256 校验，安装名称暂保留 RouteDeck 以兼容旧版更新。继续后将暂时停止代理并重启 Serylane，正在进行的 Codex 对话、下载等连接可能中断。确认现在安装吗？",
+    message: "Serylane 安装包已通过签名和 SHA-256 校验。继续后将暂时停止代理并重启 Serylane，正在进行的 Codex 对话、下载等连接可能中断。确认现在安装吗？",
     confirmLabel: "确认安装并重启",
     returnFocus: event.currentTarget as HTMLElement,
   });
@@ -2484,11 +2484,13 @@ $("#settings-form")!.addEventListener("submit", async (event) => {
     controllerPort: Number(($("#settings-controller-port") as HTMLInputElement).value),
     theme: themeController.snapshot.preference,
     launchAtLogin: ($("#settings-launch") as HTMLInputElement).checked,
+    silentStartup: ($("#settings-silent-startup") as HTMLInputElement).checked,
     restoreLastSession: ($("#settings-restore-session") as HTMLInputElement).checked,
     showGlobalTraffic: ($("#settings-global-traffic") as HTMLInputElement).checked,
     diagnosticsRetentionDays: Number(
       ($("#settings-retention") as HTMLInputElement).value,
     ),
+    appLogRetentionDays: Number(($("#settings-app-log-retention") as HTMLInputElement).value),
   };
   settingsSaving = true;
   runtimeMutationRevision++;
@@ -2518,9 +2520,9 @@ $("#settings-form")!.addEventListener("submit", async (event) => {
 
 window.setInterval(() => {
   if (sessionResumePresentation(sessionResumeStatus).busy) void refreshSessionResume();
+  if (store.view === "logs") void refreshLogs();
   if (store.runtime?.phase === "running") {
     void refreshRuntimeOnly();
-    if (store.view === "logs") void refreshLogs();
     if (store.view === "connections") void refreshConnections();
   }
 }, 3_000);

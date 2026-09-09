@@ -37,11 +37,15 @@ export const preferencesMarkup = `
         <label for="settings-controller-port">Controller Port<input id="settings-controller-port" type="number" min="1024" max="65535" required /></label>
       </div>
       <label class="preference-row" for="settings-launch"><span>登录时启动</span>${preferenceSwitch("settings-launch")}</label>
+      <label class="preference-row" for="settings-silent-startup"><span>开机静默启动</span>${preferenceSwitch("settings-silent-startup")}</label>
+      <p class="session-resume-help">仅隐藏登录时的主窗口，托盘继续运行；手动打开软件仍显示窗口。需要同时开启“登录时启动”。</p>
       <label class="preference-row" for="settings-restore-session"><span>恢复上次运行状态</span>${preferenceSwitch("settings-restore-session")}</label>
       <p class="session-resume-help" id="session-resume-help"></p>
       <p class="session-resume-help" id="session-resume-status" role="status" aria-live="polite"></p>
       <label class="preference-row" for="settings-global-traffic"><span>显示全局流量监控</span>${preferenceSwitch("settings-global-traffic")}</label>
-      <label class="preference-row" for="settings-retention"><span>日志保留天数</span><input class="preference-number" id="settings-retention" type="number" min="1" max="90" required /></label>
+      <label class="preference-row" for="settings-retention"><span>诊断报告保留天数</span><input class="preference-number" id="settings-retention" type="number" min="1" max="90" required /></label>
+      <label class="preference-row" for="settings-app-log-retention"><span>应用日志保留天数</span><input class="preference-number" id="settings-app-log-retention" type="number" min="1" max="90" step="1" required aria-describedby="app-log-retention-help" /></label>
+      <p class="session-resume-help" id="app-log-retention-help">默认 3 天，可设置 1–90 天；正文上限 256 KiB / 2,000 条，满额时提前淘汰旧记录。缩短期限会清理过期记录，延长不会恢复已清理内容。不保存对话或订阅凭据。</p>
       <div class="preference-actions runtime-actions"><details class="preference-help"><summary>网络模式说明</summary><p id="network-mode-help">模式与端口改动仅在保存后生效；更改前会停止核心，再恢复运行。</p></details><button class="button button-primary" type="submit">保存设置</button></div>
     </form>
   </article>

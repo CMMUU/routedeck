@@ -8,6 +8,7 @@ use crate::{
     storage::AppStorage,
 };
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, VecDeque},
     sync::{
@@ -156,7 +157,52 @@ struct HealthState {
     current: Option<String>,
     epoch: u64,
     nodes: BTreeMap<String, NodeHealth>,
+    identities: BTreeMap<String, [u8; 32]>,
     snapshot: StabilitySnapshot,
+}
+
+impl HealthState {
+    fn reconcile(
+        &mut self,
+        profile: Option<Uuid>,
+        revision: Option<Uuid>,
+        identities: BTreeMap<String, [u8; 32]>,
+    ) {
+        if self.profile == profile && self.revision == revision {
+            return;
+        }
+        if self.profile != profile {
+            self.nodes.clear();
+        } else {
+            // Regenerating a ranking/revision must not erase a failed node's
+            // cooldown. Never carry observations to a renamed/replaced server.
+            self.nodes.retain(|name, _| {
+                self.identities
+                    .get(name)
+                    .zip(identities.get(name))
+                    .is_some_and(|(old, new)| old == new)
+            });
+        }
+        self.current = None;
+        self.epoch += 1;
+        self.profile = profile;
+        self.revision = revision;
+        self.identities = identities;
+    }
+}
+
+fn node_identities(source: &str) -> AppResult<BTreeMap<String, [u8; 32]>> {
+    let document: serde_yaml::Value = serde_yaml::from_str(source)
+        .map_err(|_| AppError::Config("无法读取稳定策略节点身份".into()))?;
+    let mut identities = BTreeMap::new();
+    for node in document["proxies"].as_sequence().into_iter().flatten() {
+        if let Some(name) = node["name"].as_str() {
+            let bytes = serde_yaml::to_string(node)
+                .map_err(|_| AppError::Config("无法核对稳定策略节点身份".into()))?;
+            identities.insert(name.to_string(), Sha256::digest(bytes.as_bytes()).into());
+        }
+    }
+    Ok(identities)
 }
 #[derive(Clone, Default)]
 pub struct StabilityManager {
@@ -298,6 +344,11 @@ impl StabilityManager {
                     break;
                 }
                 if manager.tick(&app).await.is_err() {
+                    crate::app_log::record(
+                        1,
+                        crate::app_log::Area::Stability,
+                        "稳定性检查暂不可用，保留当前节点；未关闭连接",
+                    );
                     if let Ok(mut s) = manager.inner.lock() {
                         s.snapshot.running = false;
                         s.snapshot.message =
@@ -312,19 +363,33 @@ impl StabilityManager {
         let active = storage.state()?.active_profile_id;
         let profile = active.map(|id| storage.load_profile(id)).transpose()?;
         let policy = profile.as_ref().map(|p| &p.openai_policy);
+        let revision = profile.as_ref().and_then(|p| p.active_revision_id);
+        let identities_changed = {
+            let s = self
+                .inner
+                .lock()
+                .map_err(|_| AppError::Runtime("稳定性状态不可用".into()))?;
+            s.profile != active || s.revision != revision
+        };
+        let identities = if identities_changed {
+            match active.zip(revision) {
+                Some((id, revision)) => {
+                    node_identities(&storage.load_revision_source(id, revision)?)?
+                }
+                None => BTreeMap::new(),
+            }
+        } else {
+            BTreeMap::new()
+        };
         {
             let mut s = self
                 .inner
                 .lock()
                 .map_err(|_| AppError::Runtime("稳定性状态不可用".into()))?;
-            let revision = profile.as_ref().and_then(|p| p.active_revision_id);
-            if s.profile != active || s.revision != revision {
-                s.nodes.clear();
-                s.current = None;
-                s.epoch += 1;
-                s.profile = active;
-                s.revision = revision;
-            }
+            s.reconcile(active, revision, identities);
+            s.nodes.retain(|name, _| {
+                policy.is_some_and(|p| p.selected_nodes.iter().any(|n| n.name == *name))
+            });
             s.snapshot.profile_id = active;
             s.snapshot.revision_id = revision;
             s.snapshot.eligible = policy.is_some_and(|p| p.enabled && p.selected_nodes.len() >= 2);
@@ -437,6 +502,11 @@ impl StabilityManager {
             return Ok(());
         }
         api.select_proxy(GROUP, &candidate).await?;
+        crate::app_log::record(
+            1,
+            crate::app_log::Area::Stability,
+            "原节点连续失败，已为后续新连接切换出口；不主动关闭现有连接，也不重放模型请求",
+        );
         let mut s = self
             .inner
             .lock()
@@ -510,6 +580,47 @@ pub async fn set_openai_stability(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn refresh_retains_cooldown_only_for_unchanged_node_identity() {
+        let profile = Uuid::new_v4();
+        let source = "proxies:\n  - {name: a, type: vless, server: example.invalid, port: 443, uuid: fixture}\n";
+        let mut state = HealthState::default();
+        state.reconcile(
+            Some(profile),
+            Some(Uuid::new_v4()),
+            node_identities(source).unwrap(),
+        );
+        state
+            .nodes
+            .entry("a".into())
+            .or_default()
+            .record(10, Evidence::Probe(false));
+        state
+            .nodes
+            .get_mut("a")
+            .unwrap()
+            .record(20, Evidence::Probe(false));
+        state.reconcile(
+            Some(profile),
+            Some(Uuid::new_v4()),
+            node_identities(source).unwrap(),
+        );
+        assert_eq!(state.nodes["a"].cooldown_until, 320);
+        let changed = source.replace("example.invalid", "new.example.invalid");
+        state.reconcile(
+            Some(profile),
+            Some(Uuid::new_v4()),
+            node_identities(&changed).unwrap(),
+        );
+        assert!(state.nodes.is_empty());
+        state.nodes.insert("a".into(), NodeHealth::default());
+        state.reconcile(
+            Some(Uuid::new_v4()),
+            Some(Uuid::new_v4()),
+            node_identities(&changed).unwrap(),
+        );
+        assert!(state.nodes.is_empty());
+    }
     #[test]
     fn healthy_current_is_sticky_and_one_failure_does_not_switch() {
         let mut nodes = BTreeMap::new();

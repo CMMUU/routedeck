@@ -63,13 +63,18 @@ let fixtureUpdate: AppUpdateStatus = { phase: "idle", info: null, downloadedByte
 let updateScenario = "available";
 let cancelUpdateDownload = false;
 let updateInstallCount = 0;
-let appearanceSettings = { launchAtLogin: false, restoreLastSession: true, showGlobalTraffic: true, diagnosticsRetentionDays: 7 };
+let appearanceSettings = { launchAtLogin: false, silentStartup: false, restoreLastSession: true, showGlobalTraffic: true, diagnosticsRetentionDays: 7, appLogRetentionDays: 3 };
 let fixtureResumeStatus = { phase: "idle", message: "合成状态：上次核心已停止，保持停止。未读取真实应用数据。" };
 window.addEventListener("routedeck-fixture-resume", event => {
   const detail = (event as CustomEvent).detail;
   if (["idle", "pending", "restoring", "restored", "paused"].includes(detail.phase)) fixtureResumeStatus = { phase: detail.phase, message: String(detail.message) };
 });
 let settingsSaveCount = 0;
+let applicationLogReads = 0;
+let applicationLogEntries = [
+  { timestamp: Date.now(), level: "warn", source: "网络预检", message: "演示事件：连接超时；未接管系统代理。此行不是实际网络故障。", count: 2 },
+  { timestamp: Date.now() - 1000, level: "info", source: "状态恢复", message: "演示事件：上次已停止，保持停止。", count: 1 },
+];
 
 // Explicitly opt in to a wholly in-memory toolbar-start scenario. The default
 // visual fixture still rejects core/network mutations; no IPC is forwarded.
@@ -691,6 +696,11 @@ const readonlyReplies: Record<string, () => unknown> = {
     { timestamp: stamp, level: "warning", source: "fixture", message: "提示日志：所有节点、连接和带宽数值均为虚构。" },
     { timestamp: stamp, level: "error", source: "fixture", message: "错误样式预览：此行不是实际网络错误。" },
   ],
+  application_logs: () => {
+    document.documentElement.dataset.fixtureApplicationLogReads = String(++applicationLogReads);
+    return { retentionHours: appearanceSettings.appLogRetentionDays * 24, maxBytes: 262144, storageError: null, entries: structuredClone(applicationLogEntries) };
+  },
+  clear_application_logs: () => { applicationLogEntries = []; },
   run_connectivity_diagnostics: () => [{ stage: "fixture", success: true, latencyMs: null, detail: "合成诊断结果；未发送实际网络请求。" }],
   run_network_safety_check: () => ({ success: true, proxyEndpoint: "fixture-only", checks: [] }),
 };
@@ -897,6 +907,13 @@ mockIPC(async (command, payload) => {
   if (command === "set_openai_stability") {
     routeCalls.stability++; reportRoute();
     if (args.confirmed !== true || typeof args.enabled !== "boolean") throw routeError("INVALID_INPUT", "稳定策略需要独立确认。");
+    const active = profiles.find(profile => profile.id === activeProfileId);
+    if (active && active.id === args.profileId && active.activeRevisionId === args.revisionId && active.openaiPolicy.enabled) {
+      active.openaiPolicy.stabilityEnabled = args.enabled;
+      active.activeRevisionId = `fixture-stability-${routeCalls.stability}`;
+      // Changing the proxy policy never enables the local route or Codex binding.
+      reportRoute(); return;
+    }
     if (!route.stability.eligible || args.profileId !== route.stability.profileId || args.revisionId !== route.stability.revisionId)
       throw routeError("STATE_CONFLICT", "当前灾备配置不可用或已更新，请刷新后重新确认。");
     route.stability.enabled = route.stability.running = args.enabled;
@@ -913,7 +930,8 @@ mockIPC(async (command, payload) => {
       report("已拦截预览中的网络模式或端口修改");
       throw new Error("FIXTURE_ONLY: 网络模式与端口不可在预览中修改");
     }
-    appearanceSettings = { launchAtLogin: value.launchAtLogin, restoreLastSession: value.restoreLastSession, showGlobalTraffic: value.showGlobalTraffic, diagnosticsRetentionDays: value.diagnosticsRetentionDays };
+    if (!Number.isInteger(value.appLogRetentionDays) || value.appLogRetentionDays < 1 || value.appLogRetentionDays > 90) throw new Error("INVALID_INPUT: 应用日志保留天数必须在 1 到 90 之间");
+    appearanceSettings = { launchAtLogin: value.launchAtLogin, silentStartup: value.silentStartup, restoreLastSession: value.restoreLastSession, showGlobalTraffic: value.showGlobalTraffic, diagnosticsRetentionDays: value.diagnosticsRetentionDays, appLogRetentionDays: value.appLogRetentionDays };
     document.documentElement.dataset.fixtureSettingsSaves = String(++settingsSaveCount);
     report("运行偏好已保存到合成状态；未触及系统设置");
     return settings();
