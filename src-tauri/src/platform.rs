@@ -50,6 +50,109 @@ pub struct SystemProxyStatus {
     pub platform: String,
 }
 
+/// A read-only baseline for automatic recovery. Unlike an explicit Start click,
+/// recovery may not take over another client's proxy or a newly chosen PAC.
+pub(crate) struct ResumeProxyGuard {
+    baseline: SystemProxySnapshot,
+}
+
+pub(crate) fn prepare_automatic_proxy_resume(app: &AppHandle) -> AppResult<ResumeProxyGuard> {
+    let baseline = capture_system_proxy()?;
+    #[cfg(windows)]
+    let owned = {
+        let path = snapshot_path(app)?;
+        if path.exists() {
+            let saved: WindowsProxyLease = serde_json::from_slice(&fs::read(&path)?)
+                .map_err(|error| AppError::Platform(error.to_string()))?;
+            let port = crate::storage::AppStorage::from_app(app)?
+                .settings()?
+                .mixed_port;
+            // Ownership and availability must describe the same observation.
+            // status(app) would capture again and can refer to a different client.
+            saved.owns(&baseline, port)
+        } else {
+            false
+        }
+    };
+    #[cfg(not(windows))]
+    let owned = {
+        let _ = app;
+        // Non-Windows legacy snapshots do not track ownership. A snapshot file
+        // alone is not sufficient authority to overwrite an active proxy.
+        false
+    };
+    if !resume_proxy_available(&baseline, owned) {
+        return Err(AppError::Conflict(
+            "系统代理或 PAC 已由其他配置占用，自动恢复不会覆盖它".into(),
+        ));
+    }
+    #[cfg(target_os = "macos")]
+    if let SystemProxySnapshot::Macos { services } = &baseline {
+        for service in services {
+            for query in ["-getautoproxyurl", "-getproxyautodiscovery"] {
+                let value = run_command("networksetup", &[query, &service.service])?;
+                if value.lines().any(|line| {
+                    line.trim().eq_ignore_ascii_case("Enabled: Yes")
+                        || line.trim().eq_ignore_ascii_case("Auto Proxy Discovery: On")
+                }) {
+                    return Err(AppError::Conflict(
+                        "系统已启用 PAC 或自动代理发现，自动恢复不会覆盖它".into(),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(ResumeProxyGuard { baseline })
+}
+
+pub(crate) fn enable_automatic_system_proxy(
+    app: &AppHandle,
+    port: u16,
+    guard: &ResumeProxyGuard,
+) -> AppResult<SystemProxyStatus> {
+    // Re-read immediately before applying, after the asynchronous core and
+    // connectivity checks. If ownership changed meanwhile, leave it untouched.
+    let current = prepare_automatic_proxy_resume(app)?;
+    if current.baseline != guard.baseline {
+        return Err(AppError::Conflict(
+            "启动检查期间系统代理设置已变化，已取消自动接管".into(),
+        ));
+    }
+    let mut mutation_started = false;
+    let result =
+        enable_system_proxy_guarded(app, port, Some(&guard.baseline), &mut mutation_started);
+    if result.is_err() && mutation_started {
+        // A baseline refusal performed no write and must never restore a stale
+        // snapshot over the client whose new configuration caused that refusal.
+        let _ = restore_system_proxy(app);
+    }
+    result
+}
+
+fn resume_proxy_available(snapshot: &SystemProxySnapshot, owned: bool) -> bool {
+    if owned {
+        return true;
+    }
+    match snapshot {
+        SystemProxySnapshot::Windows {
+            proxy_enable,
+            auto_config_url,
+            ..
+        } => {
+            *proxy_enable == 0
+                && auto_config_url
+                    .as_deref()
+                    .is_none_or(|value| value.trim().is_empty())
+        }
+        SystemProxySnapshot::Macos { services } => services.iter().all(|service| {
+            !service.http.enabled && !service.https.enabled && !service.socks.enabled
+        }),
+        SystemProxySnapshot::Linux { values } => values
+            .get("org.gnome.system.proxy|mode")
+            .is_some_and(|mode| mode.trim().trim_matches('\'') == "none"),
+    }
+}
+
 #[cfg(target_os = "macos")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MacNetworkServiceEntry {
@@ -59,10 +162,34 @@ struct MacNetworkServiceEntry {
 }
 
 pub fn enable_system_proxy(app: &AppHandle, port: u16) -> AppResult<SystemProxyStatus> {
+    enable_system_proxy_guarded(app, port, None, &mut false)
+}
+
+fn check_resume_baseline(
+    current: &SystemProxySnapshot,
+    expected: Option<&SystemProxySnapshot>,
+) -> AppResult<()> {
+    if expected.is_some_and(|value| current != value) {
+        return Err(AppError::Conflict(
+            "接入前系统代理设置已变化，已取消自动接管".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn enable_system_proxy_guarded(
+    app: &AppHandle,
+    port: u16,
+    expected: Option<&SystemProxySnapshot>,
+    mutation_started: &mut bool,
+) -> AppResult<SystemProxyStatus> {
     #[cfg(windows)]
     {
         let path = snapshot_path(app)?;
         let current = capture_system_proxy()?;
+        // Compare the exact capture used to construct the new lease. Do not
+        // validate one observation and then unconditionally accept a newer one.
+        check_resume_baseline(&current, expected)?;
         let original = if path.exists() {
             let saved: WindowsProxyLease = serde_json::from_slice(&fs::read(&path)?)
                 .map_err(|error| AppError::Platform(error.to_string()))?;
@@ -83,6 +210,7 @@ pub fn enable_system_proxy(app: &AppHandle, port: u16) -> AppResult<SystemProxyS
             committed: false,
         };
         write_snapshot(&path, &lease)?;
+        *mutation_started = true;
         restore_snapshot(&applied)?;
         if let WindowsProxyLease::Tracked { committed, .. } = &mut lease {
             *committed = true;
@@ -93,10 +221,12 @@ pub fn enable_system_proxy(app: &AppHandle, port: u16) -> AppResult<SystemProxyS
     #[cfg(not(windows))]
     {
         let snapshot_path = snapshot_path(app)?;
-        if !snapshot_path.exists() {
+        if expected.is_some() || !snapshot_path.exists() {
             let snapshot = capture_system_proxy()?;
+            check_resume_baseline(&snapshot, expected)?;
             write_snapshot(&snapshot_path, &snapshot)?;
         }
+        *mutation_started = true;
         apply_system_proxy(port)?;
         Ok(status(app))
     }
@@ -949,6 +1079,90 @@ mod tests {
 #[cfg(test)]
 mod windows_proxy_tests {
     use super::*;
+
+    #[test]
+    fn automatic_resume_never_takes_over_external_proxy_or_pac() {
+        let mut current = original();
+        assert!(!resume_proxy_available(&current, false));
+        if let SystemProxySnapshot::Windows {
+            proxy_enable,
+            auto_config_url,
+            ..
+        } = &mut current
+        {
+            *proxy_enable = 0;
+            *auto_config_url = None;
+        }
+        assert!(resume_proxy_available(&current, false));
+        if let SystemProxySnapshot::Windows {
+            auto_config_url, ..
+        } = &mut current
+        {
+            *auto_config_url = Some("https://company.example.invalid/proxy.pac".into());
+        }
+        assert!(!resume_proxy_available(&current, false));
+        assert!(resume_proxy_available(
+            &windows_applied_proxy(&original(), 7890),
+            true
+        ));
+        assert!(!resume_proxy_available(
+            &windows_applied_proxy(&original(), 7890),
+            false
+        ));
+    }
+
+    #[test]
+    fn actual_lease_capture_rejects_changes_after_initial_baseline_check() {
+        let baseline = SystemProxySnapshot::Windows {
+            proxy_enable: 0,
+            proxy_server: None,
+            proxy_override: None,
+            auto_config_url: None,
+        };
+        assert!(check_resume_baseline(&baseline, Some(&baseline)).is_ok());
+        // A later capture is the one used to create a lease; an earlier match
+        // must not authorize this newly observed external proxy.
+        assert!(check_resume_baseline(&original(), Some(&baseline)).is_err());
+        assert!(check_resume_baseline(&original(), None).is_ok());
+    }
+
+    #[test]
+    fn automatic_resume_requires_inactive_non_windows_proxy() {
+        let mut service = MacServiceProxyState::default();
+        assert!(resume_proxy_available(
+            &SystemProxySnapshot::Macos {
+                services: vec![service.clone()]
+            },
+            false
+        ));
+        service.https.enabled = true;
+        assert!(!resume_proxy_available(
+            &SystemProxySnapshot::Macos {
+                services: vec![service]
+            },
+            false
+        ));
+        for (mode, allowed) in [("'none'", true), ("'manual'", false), ("'auto'", false)] {
+            assert_eq!(
+                resume_proxy_available(
+                    &SystemProxySnapshot::Linux {
+                        values: BTreeMap::from([(
+                            "org.gnome.system.proxy|mode".into(),
+                            mode.into()
+                        )]),
+                    },
+                    false
+                ),
+                allowed
+            );
+        }
+        assert!(!resume_proxy_available(
+            &SystemProxySnapshot::Linux {
+                values: BTreeMap::new()
+            },
+            false
+        ));
+    }
 
     fn original() -> SystemProxySnapshot {
         SystemProxySnapshot::Windows {

@@ -77,6 +77,7 @@ export type AppSettings = {
   locale: string;
   theme: ThemePreference;
   launchAtLogin: boolean;
+  restoreLastSession: boolean;
   showGlobalTraffic: boolean;
   networkMode: NetworkMode;
   mixedPort: number;
@@ -107,6 +108,11 @@ export type RuntimeStatus = {
   pid: number | null;
   startedAt: string | null;
   lastError: string | null;
+};
+
+export type SessionResumeStatus = {
+  phase: "idle" | "pending" | "restoring" | "restored" | "paused";
+  message: string;
 };
 
 export type RuntimeLog = {

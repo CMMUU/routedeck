@@ -63,7 +63,12 @@ let fixtureUpdate: AppUpdateStatus = { phase: "idle", info: null, downloadedByte
 let updateScenario = "available";
 let cancelUpdateDownload = false;
 let updateInstallCount = 0;
-let appearanceSettings = { launchAtLogin: false, showGlobalTraffic: true, diagnosticsRetentionDays: 7 };
+let appearanceSettings = { launchAtLogin: false, restoreLastSession: true, showGlobalTraffic: true, diagnosticsRetentionDays: 7 };
+let fixtureResumeStatus = { phase: "idle", message: "合成状态：上次核心已停止，保持停止。未读取真实应用数据。" };
+window.addEventListener("routedeck-fixture-resume", event => {
+  const detail = (event as CustomEvent).detail;
+  if (["idle", "pending", "restoring", "restored", "paused"].includes(detail.phase)) fixtureResumeStatus = { phase: detail.phase, message: String(detail.message) };
+});
 let settingsSaveCount = 0;
 
 // Explicitly opt in to a wholly in-memory toolbar-start scenario. The default
@@ -647,6 +652,7 @@ const readonlyReplies: Record<string, () => unknown> = {
   app_info: () => ({ productName: "Serylane", version: `${packageInfo.version} · 合成预览`, targetOs: previewWindows ? "windows" : "macos", targetArch: previewWindows ? "x86_64" : "aarch64" }),
   app_update_status: () => structuredClone(fixtureUpdate),
   get_settings: settings,
+  get_session_resume_status: () => fixtureResumeStatus,
   get_user_rules: userRulesState,
   list_proxy_programs: programState,
   check_system_proxy_compatibility: () => ({ supported: true, systemConfigured: true, compatible: true, expectedProxy: programs.proxyEndpoint, resolvedHttp: programs.proxyEndpoint, resolvedHttps: programs.proxyEndpoint, detail: "合成检查：HTTP/HTTPS 解析已指向本地代理；未读取真实注册表，也未验证真实长连接。" }),
@@ -907,7 +913,7 @@ mockIPC(async (command, payload) => {
       report("已拦截预览中的网络模式或端口修改");
       throw new Error("FIXTURE_ONLY: 网络模式与端口不可在预览中修改");
     }
-    appearanceSettings = { launchAtLogin: value.launchAtLogin, showGlobalTraffic: value.showGlobalTraffic, diagnosticsRetentionDays: value.diagnosticsRetentionDays };
+    appearanceSettings = { launchAtLogin: value.launchAtLogin, restoreLastSession: value.restoreLastSession, showGlobalTraffic: value.showGlobalTraffic, diagnosticsRetentionDays: value.diagnosticsRetentionDays };
     document.documentElement.dataset.fixtureSettingsSaves = String(++settingsSaveCount);
     report("运行偏好已保存到合成状态；未触及系统设置");
     return settings();
@@ -1097,6 +1103,14 @@ window.EventSource = class extends EventSource {
 
 element("fixture-system-light").addEventListener("click", () => setSystemDark(false));
 element("fixture-system-dark").addEventListener("click", () => setSystemDark(true));
+for (const [phase, message] of [
+  ["paused", "合成暂停：其他程序已接管系统代理，未自动覆盖。请检查后手动启动。"],
+  ["restoring", "合成进度：正在恢复上次配置与网络模式；未启动真实内核。"],
+  ["idle", "合成状态：上次核心已停止，保持停止。未读取真实应用数据。"],
+]) element(`fixture-resume-${phase}`).addEventListener("click", () => {
+  fixtureResumeStatus = { phase, message };
+  element("global-refresh").click();
+});
 element("fixture-fail-save").addEventListener("click", () => {
   failNextThemeSave = !failNextThemeSave;
   report(failNextThemeSave ? "下一次实际主题保存将失败；请选择不同主题" : "已取消模拟保存失败");

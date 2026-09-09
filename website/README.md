@@ -62,7 +62,7 @@ CI 仅检查，不存储 Cloudflare 凭据，也不会自动登录或部署。�
 
 新版本发布后，必须先核对 GitHub Release、Gitee API、具体文件的 HEAD 状态及大小，再同步修改 `public/site.js` 的 release 快照、首页无 JavaScript 降级链接/版本文字和 `scripts/test-downloads.mjs` 的独立预期值。未发布的源码版本、标签或存在的签名文件，不是包已存在的证据。国内链接不齐时不谎报镜像成功。
 
-桌面展示名为 Serylane，但 `RouteDeck_…` 安装包、仓库 URL、更新清单及签名身份保留以兼容旧客户端。
+对外页面只使用 Serylane 品牌；真实安装包文件名、仓库 URL、更新清单及签名身份保持兼容。
 
 ## SEO 与安全
 

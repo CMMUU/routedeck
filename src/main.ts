@@ -6,6 +6,7 @@ import { subscriptionCardMarkup } from "./subscription-cards";
 import { subscriptionImportMarkup, describeSubscriptionImport } from "./subscription-import";
 import { NAV_ITEMS, navigationMarkup, type ViewName } from "./ui";
 import { preferencesMarkup } from "./settings-view";
+import { sessionResumeHelp, sessionResumePresentation } from "./session-resume";
 import { canStartRuntime, startRuntimeInMode, type RuntimeStartMode } from "./runtime-start";
 import { api, errorMessage, revisionLabel } from "./api";
 import { describeAppUpdate } from "./app-update";
@@ -36,6 +37,7 @@ import type {
   ProfileRecord,
   RuntimeLog,
   RuntimeStatus,
+  SessionResumeStatus,
   SystemProxyStatus,
   SubscriptionOverview,
   TunHelperStatus,
@@ -126,6 +128,7 @@ let networkModeSwitching = false;
 let runtimeActionInFlight = false;
 let runtimeMutationRevision = 0;
 let runtimeReadSequence = 0;
+let baseReadSequence = 0;
 let settingsSaving = false;
 let appUpdateChecking = false;
 let appUpdateError: string | null = null;
@@ -136,6 +139,9 @@ let appUpdateOperationId = 0;
 let automaticUpdateCheckScheduled = false;
 let updateCheckAttemptedThisSession = false;
 let appearanceFeedback = "";
+let sessionResumeStatus: SessionResumeStatus | null = null;
+let sessionResumeRevision = 0;
+let sessionResumeReadBusy = false;
 const OPENAI_GROUP_NAME = "🤖 OpenAI 自动灾备";
 document.documentElement.dataset.view = store.view;
 
@@ -177,6 +183,7 @@ app.innerHTML = `
       </header>
 
       <div class="page-scroll" id="page-scroll">
+      <aside class="session-resume-notice is-hidden" id="session-resume-notice" role="status" aria-live="polite"><strong id="session-resume-title"></strong><p id="session-resume-message"></p></aside>
       <section class="view-stack" id="overview-view">
         <div class="hero-grid">
           <article class="connection-card">
@@ -600,6 +607,7 @@ function phaseLabel(phase: string | undefined): string {
 }
 
 async function refreshBase() {
+  const requestedBaseRead = ++baseReadSequence;
   const requestedThemeRevision = themeController.mutationRevision;
   const requestedRuntimeRevision = runtimeMutationRevision;
   const requestedDuringRuntimeWrite = runtimeActionInFlight || networkModeSwitching || settingsSaving;
@@ -632,7 +640,7 @@ async function refreshBase() {
       ]);
     // A read started before/during a runtime or settings write must not put
     // the old network mode and runtime status back into the toolbar.
-    if (requestedDuringRuntimeWrite || requestedRuntimeRevision !== runtimeMutationRevision || runtimeActionInFlight || networkModeSwitching || settingsSaving) return;
+    if (requestedBaseRead !== baseReadSequence || requestedDuringRuntimeWrite || requestedRuntimeRevision !== runtimeMutationRevision || runtimeActionInFlight || networkModeSwitching || settingsSaving) return;
     if (!themeController.sync(settings.theme, requestedThemeRevision)) {
       settings.theme = themeController.snapshot.preference;
     }
@@ -660,7 +668,34 @@ async function refreshBase() {
   renderOpenAiPolicy();
   renderGlobalTraffic();
   scheduleAutomaticUpdateCheck();
+  void refreshSessionResume();
   return true;
+}
+
+function renderSessionResume() {
+  const presentation = sessionResumePresentation(sessionResumeStatus);
+  $("#session-resume-notice")!.classList.toggle("is-hidden", !presentation.visible);
+  $("#session-resume-title")!.textContent = presentation.title;
+  $("#session-resume-message")!.textContent = presentation.message;
+  $("#session-resume-status")!.textContent = sessionResumeStatus?.message ?? "";
+  if (store.settings) $("#session-resume-help")!.textContent = sessionResumeHelp(store.settings.launchAtLogin, store.settings.restoreLastSession);
+}
+
+async function refreshSessionResume() {
+  if (sessionResumeReadBusy) return;
+  sessionResumeReadBusy = true;
+  const revision = sessionResumeRevision;
+  try {
+    const status = await api.sessionResume();
+    if (revision !== sessionResumeRevision) return;
+    const wasBusy = sessionResumePresentation(sessionResumeStatus).busy;
+    sessionResumeStatus = status;
+    renderSessionResume();
+    if (wasBusy && !sessionResumePresentation(status).busy) void refreshBase();
+  } catch {
+    // Status reads never start a core or guess whether restoration succeeded.
+    if (revision === sessionResumeRevision) $("#session-resume-status")!.textContent = "恢复状态暂时无法读取，可点击刷新重试。";
+  } finally { sessionResumeReadBusy = false; }
 }
 
 function renderHeader() {
@@ -920,6 +955,7 @@ function renderSettings() {
   ($("#settings-mixed-port") as HTMLInputElement).value = String(store.settings.mixedPort);
   ($("#settings-controller-port") as HTMLInputElement).value = String(store.settings.controllerPort);
   ($("#settings-launch") as HTMLInputElement).checked = store.settings.launchAtLogin;
+  ($("#settings-restore-session") as HTMLInputElement).checked = store.settings.restoreLastSession;
   ($("#settings-global-traffic") as HTMLInputElement).checked =
     store.settings.showGlobalTraffic;
   ($("#settings-auto-check-updates") as HTMLInputElement).checked =
@@ -932,6 +968,7 @@ function renderSettings() {
   renderGlobalTraffic();
   renderAppUpdate();
   renderTunHelper();
+  renderSessionResume();
 }
 
 function renderAppUpdate() {
@@ -2447,6 +2484,7 @@ $("#settings-form")!.addEventListener("submit", async (event) => {
     controllerPort: Number(($("#settings-controller-port") as HTMLInputElement).value),
     theme: themeController.snapshot.preference,
     launchAtLogin: ($("#settings-launch") as HTMLInputElement).checked,
+    restoreLastSession: ($("#settings-restore-session") as HTMLInputElement).checked,
     showGlobalTraffic: ($("#settings-global-traffic") as HTMLInputElement).checked,
     diagnosticsRetentionDays: Number(
       ($("#settings-retention") as HTMLInputElement).value,
@@ -2479,6 +2517,7 @@ $("#settings-form")!.addEventListener("submit", async (event) => {
 });
 
 window.setInterval(() => {
+  if (sessionResumePresentation(sessionResumeStatus).busy) void refreshSessionResume();
   if (store.runtime?.phase === "running") {
     void refreshRuntimeOnly();
     if (store.view === "logs") void refreshLogs();
@@ -2494,6 +2533,13 @@ void listen<GlobalTrafficSnapshot>("global-traffic", (event) => {
   store.globalTraffic = event.payload;
   renderGlobalTraffic();
 });
+
+void listen<SessionResumeStatus>("session-resume-status", (event) => {
+  sessionResumeRevision++;
+  sessionResumeStatus = event.payload;
+  renderSessionResume();
+  if (!sessionResumePresentation(event.payload).busy) void refreshBase();
+}).then(() => refreshSessionResume()).catch(() => { void refreshSessionResume(); });
 
 void listen<NetworkSafetyReport>("network-safety-report", (event) => {
   store.networkSafety = event.payload;

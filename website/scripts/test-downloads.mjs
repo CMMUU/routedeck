@@ -145,9 +145,9 @@ function assertSelection(view, expected) {
   }
   assert.equal(view.github.querySelector('span').textContent, domestic ? 'GitHub 备用' : `GitHub 下载 · ${format}`);
   assert.equal(view.gitee.querySelector('span').textContent, domestic ? `国内下载 · ${format}` : '查看 Gitee 发布');
-  assert.equal(view.github.getAttribute('aria-label'), `从 GitHub 下载 RouteDeck ${version} ${label}`);
+  assert.equal(view.github.getAttribute('aria-label'), `从 GitHub 下载 Serylane ${version} ${label}`);
   assert.equal(view.gitee.getAttribute('aria-label'), domestic
-    ? `从 Gitee 下载 RouteDeck ${version} ${label}`
+    ? `从 Gitee 下载 Serylane ${version} ${label}`
     : `查看 Gitee ${version} 发布页；当前未提供 ${label}`);
   const note = domestic ? `国内渠道已提供 ${label}，GitHub 备用。` : `国内镜像暂缺 ${label}，请使用 GitHub。`;
   assert.equal(view.query('#channel-note').textContent, note, 'Missing mirror notice names the specific package format');
@@ -178,7 +178,7 @@ check('No-JavaScript HTML offers verified GitHub Windows x64, a domestic release
   assert.ok(hasClass(byId('download-github'), 'button-primary'));
   assert.ok(hasClass(byId('download-gitee'), 'button-secondary'));
   assert.deepEqual([...releaseLinks.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]), ['download-github', 'download-gitee']);
-  assert.equal(byId('download-github').attributes['aria-label'], `从 GitHub 下载 RouteDeck ${version} Windows x64 EXE 安装包`);
+  assert.equal(byId('download-github').attributes['aria-label'], `从 GitHub 下载 Serylane ${version} Windows x64 EXE 安装包`);
   assert.equal(byId('download-gitee').attributes['aria-label'], `查看 Gitee ${version} 发布页；当前未提供 Windows x64 EXE 安装包`);
   assert.match(contentById('download-gitee'), /<span>查看 Gitee 发布<\/span>/);
   assert.match(contentById('download-github'), /<span>GitHub 下载 · EXE<\/span>/);

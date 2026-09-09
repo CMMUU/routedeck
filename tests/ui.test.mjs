@@ -190,7 +190,7 @@ test("refreshBase rejects a delayed pre-start snapshot after a network mutation"
   const noop = () => {};
   const environment = {
     themeController: { mutationRevision: 0, sync: () => true },
-    runtimeMutationRevision: 0, runtimeActionInFlight: false, networkModeSwitching: false, settingsSaving: false,
+    runtimeMutationRevision: 0, baseReadSequence: 0, runtimeActionInFlight: false, networkModeSwitching: false, settingsSaving: false,
     store: { settings: { networkMode: "manual" }, runtime: staleRuntime },
     action: async (_label, operation) => operation(),
     api: new Proxy({ settings: () => settingsRead, runtime: async () => staleRuntime }, { get: (target, key) => target[key] ?? (async () => null) }),

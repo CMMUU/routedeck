@@ -15,6 +15,7 @@ mod platform;
 mod profile_service;
 mod program_proxy;
 mod runtime;
+mod session_resume;
 mod storage;
 mod subscription;
 mod traffic_monitor;
@@ -197,17 +198,25 @@ fn update_settings(
         )));
     }
     let settings = settings.merge_secret(&current);
-    let autostart = app.autolaunch();
-    if settings.launch_at_login {
-        autostart
-            .enable()
-            .map_err(|error| dto(AppError::Platform(error.to_string())))?;
-    } else {
-        autostart
-            .disable()
-            .map_err(|error| dto(AppError::Platform(error.to_string())))?;
+    // Saving restoration or appearance preferences is not consent to rewrite
+    // the user's OS login registration. Only an actual checkbox change is.
+    if settings.launch_at_login != current.launch_at_login {
+        let autostart = app.autolaunch();
+        if settings.launch_at_login {
+            autostart
+                .enable()
+                .map_err(|error| dto(AppError::Platform(error.to_string())))?;
+        } else {
+            autostart
+                .disable()
+                .map_err(|error| dto(AppError::Platform(error.to_string())))?;
+        }
     }
     storage.save_settings(&settings).map_err(dto)?;
+    if settings.restore_last_session != current.restore_last_session {
+        app.state::<session_resume::SessionResumeManager>()
+            .cancel_pending(&app);
+    }
     appearance::apply_native_theme(&app, &settings.theme).map_err(dto)?;
     traffic.set_enabled(&app, settings.show_global_traffic);
     Ok(PublicAppSettings::from(&settings))
@@ -343,25 +352,57 @@ async fn start_active_profile(
     app: AppHandle,
     state: State<'_, MihomoRuntime>,
 ) -> Result<RuntimeStatus, AppErrorDto> {
-    let _configuration = user_rules::acquire_configuration(&app).map_err(dto)?;
+    let _configuration = session_resume::acquire_manual_configuration(&app)
+        .await
+        .map_err(dto)?;
     let storage = AppStorage::from_app(&app).map_err(dto)?;
     let settings = storage.settings().map_err(dto)?;
-    let effective = active_effective_config(&app, &settings).map_err(dto)?;
-    runtime::validate_source(&app, &effective.yaml).map_err(dto)?;
-    storage.mark_clean_shutdown(false).map_err(dto)?;
-    if settings.network_mode == NetworkMode::Tun {
-        state.start_tun(&app, &effective.yaml).map_err(dto)?;
-    } else {
-        state.start(&app, &effective.yaml).map_err(dto)?;
+    start_runtime_for_settings(&app, &state, &settings, None).await?;
+    if let Err(error) = app
+        .state::<session_resume::SessionResumeManager>()
+        .while_open(|| storage.set_desired_running(true))
+    {
+        let _ = platform::restore_system_proxy(&app);
+        let _ = state.stop(Some(&app));
+        return Err(dto(error));
     }
-    finish_runtime_start(&app, &state, &settings).await?;
     Ok(state.status(Some(&app)))
+}
+
+async fn start_runtime_for_settings(
+    app: &AppHandle,
+    state: &State<'_, MihomoRuntime>,
+    settings: &AppSettings,
+    automatic_proxy: Option<&platform::ResumeProxyGuard>,
+) -> Result<(), AppErrorDto> {
+    let storage = AppStorage::from_app(app).map_err(dto)?;
+    let effective = active_effective_config(app, settings).map_err(dto)?;
+    runtime::validate_source(app, &effective.yaml).map_err(dto)?;
+    app.state::<session_resume::SessionResumeManager>()
+        .while_open(|| {
+            storage.mark_clean_shutdown(false)?;
+            if settings.network_mode == NetworkMode::Tun {
+                state.start_tun(app, &effective.yaml)
+            } else {
+                state.start(app, &effective.yaml)
+            }
+        })
+        .map_err(dto)?;
+    finish_runtime_start(app, state, settings, automatic_proxy).await?;
+    if app
+        .state::<session_resume::SessionResumeManager>()
+        .is_shutting_down()
+    {
+        return Err(dto(AppError::Conflict("应用正在退出，启动已取消".into())));
+    }
+    Ok(())
 }
 
 async fn finish_runtime_start(
     app: &AppHandle,
     state: &State<'_, MihomoRuntime>,
     settings: &AppSettings,
+    automatic_proxy: Option<&platform::ResumeProxyGuard>,
 ) -> Result<(), AppErrorDto> {
     let api = MihomoApiClient::new(settings).map_err(dto)?;
     let ready_timeout = if settings.network_mode == NetworkMode::Tun {
@@ -378,8 +419,18 @@ async fn finish_runtime_start(
             let _ = state.stop(Some(app));
             return Err(dto(error));
         }
-        if let Err(error) = platform::enable_system_proxy(app, settings.mixed_port) {
-            let _ = platform::restore_system_proxy(app);
+        let proxy_result = app
+            .state::<session_resume::SessionResumeManager>()
+            .while_open(|| match automatic_proxy {
+                Some(guard) => {
+                    platform::enable_automatic_system_proxy(app, settings.mixed_port, guard)
+                }
+                None => platform::enable_system_proxy(app, settings.mixed_port),
+            });
+        if let Err(error) = proxy_result {
+            if automatic_proxy.is_none() {
+                let _ = platform::restore_system_proxy(app);
+            }
             let _ = state.stop(Some(app));
             return Err(dto(error));
         }
@@ -553,18 +604,31 @@ async fn prepare_tun_active_profile(app: AppHandle) -> Result<(), AppErrorDto> {
 }
 
 #[tauri::command]
-fn stop_mihomo(
-    app: AppHandle,
-    state: State<'_, MihomoRuntime>,
-) -> Result<RuntimeStatus, AppErrorDto> {
-    let _configuration = user_rules::acquire_configuration(&app).map_err(dto)?;
-    let proxy_result = platform::restore_system_proxy(&app);
-    let status = state.stop(Some(&app)).map_err(dto)?;
-    AppStorage::from_app(&app)
-        .and_then(|storage| storage.mark_clean_shutdown(true))
+async fn stop_mihomo(app: AppHandle) -> Result<RuntimeStatus, AppErrorDto> {
+    stop_runtime_by_user(&app).await
+}
+
+async fn stop_runtime_by_user(app: &AppHandle) -> Result<RuntimeStatus, AppErrorDto> {
+    let _configuration = session_resume::acquire_manual_configuration(app)
+        .await
         .map_err(dto)?;
-    proxy_result.map_err(dto)?;
-    Ok(status)
+    let storage = AppStorage::from_app(app).map_err(dto)?;
+    // Persist the accepted Stop intent before cleanup. Even an interrupted
+    // cleanup or failed proxy restoration must not turn it into an auto-start.
+    let state = app.state::<MihomoRuntime>();
+    app.state::<session_resume::SessionResumeManager>()
+        .while_open(|| {
+            // The state.json read/modify/write shares cleanup's transition lock.
+            // Shutdown cannot read the old true intent and overwrite this Stop.
+            storage.set_desired_running(false)?;
+            let proxy_result = platform::restore_system_proxy(app);
+            let status = state.stop(Some(app));
+            storage.mark_clean_shutdown(proxy_result.is_ok() && status.is_ok())?;
+            let status = status?;
+            proxy_result?;
+            Ok(status)
+        })
+        .map_err(dto)
 }
 
 #[tauri::command]
@@ -803,18 +867,25 @@ fn api_client(app: &AppHandle) -> Result<MihomoApiClient, AppErrorDto> {
 }
 
 fn cleanup_app(app: &AppHandle) {
+    let resume = app.state::<session_resume::SessionResumeManager>();
+    if !resume.begin_shutdown() {
+        return;
+    }
     app.state::<openai_stability::StabilityManager>().stop();
     let _ = app
         .state::<local_routing::LocalRoutingManager>()
         .shutdown(app);
     app.state::<GlobalTrafficMonitor>().stop();
     let _ = app.state::<OpenAiPolicyTaskManager>().cancel();
-    let _ = platform::restore_system_proxy(app);
-    let runtime = app.state::<MihomoRuntime>();
-    let _ = runtime.stop(Some(app));
-    if let Ok(storage) = AppStorage::from_app(app) {
-        let _ = storage.mark_clean_shutdown(true);
-    }
+    resume.cleanup_transition(|| {
+        let proxy = platform::restore_system_proxy(app);
+        let stopped = app.state::<MihomoRuntime>().stop(Some(app));
+        if let Ok(storage) = AppStorage::from_app(app) {
+            // Shutdown/upgrade cleanup is not a user Stop command. Preserve
+            // desired_running for the next launch, including clean shutdowns.
+            let _ = storage.mark_clean_shutdown(proxy.is_ok() && stopped.is_ok());
+        }
+    });
 }
 
 fn show_home_window(app: &AppHandle) {
@@ -839,6 +910,7 @@ pub fn run() {
             None,
         ))
         .manage(MihomoRuntime::default())
+        .manage(session_resume::SessionResumeManager::default())
         .manage(app_update::AppUpdateManager::default())
         .manage(program_proxy::ProgramProxyManager::default())
         .manage(local_routing::LocalRoutingManager::default())
@@ -888,12 +960,10 @@ pub fn run() {
                         show_home_window(app);
                     }
                     "stop" => {
-                        let Ok(_configuration) = user_rules::acquire_configuration(app) else {
-                            return;
-                        };
-                        let _ = platform::restore_system_proxy(app);
-                        let runtime = app.state::<MihomoRuntime>();
-                        let _ = runtime.stop(Some(app));
+                        let app = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let _ = stop_runtime_by_user(&app).await;
+                        });
                     }
                     "quit" => {
                         cleanup_app(app);
@@ -909,18 +979,21 @@ pub fn run() {
                 .bootstrap(app.handle());
             app.state::<openai_stability::StabilityManager>()
                 .start(app.handle().clone());
+            app.state::<session_resume::SessionResumeManager>()
+                .bootstrap(app.handle(), &settings, &persistent);
             Ok(())
         })
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
-            } else if matches!(event, WindowEvent::Destroyed) {
+            } else if window.label() == "main" && matches!(event, WindowEvent::Destroyed) {
                 cleanup_app(window.app_handle());
             }
         })
         .invoke_handler(tauri::generate_handler![
             app_info,
+            session_resume::get_session_resume_status,
             local_routing::local_route_status,
             local_routing::save_local_route,
             local_routing::set_local_route_enabled,
@@ -990,6 +1063,13 @@ pub fn run() {
             run_connectivity_diagnostics,
             run_network_safety_check,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Tao maps confirmed Windows WM_ENDSESSION to LoopDestroyed,
+            // which reaches Tauri as Exit (not necessarily Window::Destroyed).
+            if matches!(event, tauri::RunEvent::Exit) {
+                cleanup_app(app);
+            }
+        });
 }

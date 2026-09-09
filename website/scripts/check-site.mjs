@@ -20,6 +20,10 @@ for (const path of files.filter(path => path.endsWith('.html'))) {
   assert.match(html, /<html lang="zh-CN">/, `${route}: Chinese document language`);
   assert.equal([...html.matchAll(/<h1(?:\s|>)/g)].length, 1, `${route}: exactly one H1`);
   assert.match(html, /<title>[^<]+Serylane[^<]*<\/title>|<title>Serylane[^<]*<\/title>/, `${route}: title`);
+  // Published asset and repository URLs are stable compatibility identities;
+  // page copy, metadata and accessible names use only the current brand.
+  const brandedContent = html.replace(/https?:\/\/[^\s"'<>]+/g, '');
+  assert.doesNotMatch(brandedContent, /RouteDeck|mihomo-codex/i, `${route}: no former-brand copy outside URLs`);
   if (route !== '/404') assert.match(html, /<meta name="description" content="[^"]{20,}"/, `${route}: description`);
   if (route === '/404') assert.match(html, /content="noindex[^\"]*"/, '404 must not be indexed');
   else assert.ok(html.includes(`rel="canonical" href="${origin}${route}"`), `${route}: exact canonical`);
@@ -29,6 +33,8 @@ for (const path of files.filter(path => path.endsWith('.html'))) {
   for (const match of html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)) {
     const schema = JSON.parse(match[1]);
     assert.equal(schema.url, origin + route);
+    assert.equal(schema.name, 'Serylane');
+    assert.ok(!schema.alternateName, 'Do not advertise former brand aliases');
     assert.ok(!schema.aggregateRating && !schema.review, 'Do not fabricate ratings');
   }
 }

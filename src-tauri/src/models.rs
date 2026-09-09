@@ -103,6 +103,8 @@ pub struct AppSettings {
     pub theme: String,
     pub launch_at_login: bool,
     #[serde(default = "default_true")]
+    pub restore_last_session: bool,
+    #[serde(default = "default_true")]
     pub show_global_traffic: bool,
     pub network_mode: NetworkMode,
     pub mixed_port: u16,
@@ -134,6 +136,7 @@ impl Default for AppSettings {
             locale: "zh-CN".to_string(),
             theme: "system".to_string(),
             launch_at_login: false,
+            restore_last_session: true,
             show_global_traffic: true,
             network_mode: NetworkMode::Manual,
             mixed_port: 7890,
@@ -156,6 +159,8 @@ pub struct PublicAppSettings {
     pub locale: String,
     pub theme: String,
     pub launch_at_login: bool,
+    #[serde(default = "default_true")]
+    pub restore_last_session: bool,
     pub show_global_traffic: bool,
     pub network_mode: NetworkMode,
     pub mixed_port: u16,
@@ -177,6 +182,7 @@ impl From<&AppSettings> for PublicAppSettings {
             locale: value.locale.clone(),
             theme: value.theme.clone(),
             launch_at_login: value.launch_at_login,
+            restore_last_session: value.restore_last_session,
             show_global_traffic: value.show_global_traffic,
             network_mode: value.network_mode,
             mixed_port: value.mixed_port,
@@ -197,6 +203,7 @@ impl PublicAppSettings {
             locale: self.locale,
             theme: self.theme,
             launch_at_login: self.launch_at_login,
+            restore_last_session: self.restore_last_session,
             show_global_traffic: self.show_global_traffic,
             network_mode: self.network_mode,
             mixed_port: self.mixed_port,
@@ -375,6 +382,10 @@ pub struct PersistentAppState {
     pub active_revision_id: Option<Uuid>,
     pub system_proxy_snapshot_present: bool,
     pub clean_shutdown: bool,
+    /// User intent, not whether cleanup left a child process running. Legacy
+    /// state must never infer this from clean_shutdown or an active profile.
+    #[serde(default)]
+    pub desired_running: bool,
     pub updated_at: Option<DateTime<Utc>>,
 }
 
@@ -400,6 +411,8 @@ mod tests {
     fn global_traffic_monitor_is_enabled_by_default() {
         assert!(AppSettings::default().show_global_traffic);
         assert!(AppSettings::default().auto_check_updates);
+        assert!(AppSettings::default().restore_last_session);
+        assert!(!AppSettings::default().launch_at_login);
     }
 
     #[test]
@@ -421,6 +434,8 @@ mod tests {
         .expect("legacy settings");
         assert!(settings.show_global_traffic);
         assert!(settings.auto_check_updates);
+        assert!(settings.restore_last_session);
+        assert!(!settings.launch_at_login);
     }
 
     #[test]
@@ -441,5 +456,20 @@ mod tests {
         )
         .expect("legacy public settings");
         assert!(settings.auto_check_updates);
+        assert!(settings.restore_last_session);
+    }
+
+    #[test]
+    fn resume_preference_survives_public_settings_without_changing_login_or_secret() {
+        let current = AppSettings::default();
+        let mut public = super::PublicAppSettings::from(&current);
+        public.restore_last_session = false;
+        let merged = public.merge_secret(&current);
+        assert!(!merged.restore_last_session);
+        assert_eq!(merged.launch_at_login, current.launch_at_login);
+        assert_eq!(merged.controller_secret, current.controller_secret);
+        let serialized = serde_json::to_value(super::PublicAppSettings::from(&merged)).unwrap();
+        assert_eq!(serialized["restoreLastSession"], false);
+        assert!(serialized.get("controllerSecret").is_none());
     }
 }

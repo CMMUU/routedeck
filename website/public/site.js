@@ -82,7 +82,7 @@
       link.dataset.architecture = selectedArchitecture;
       link.setAttribute("aria-label", link === gitee && !domesticAvailable
         ? `查看 Gitee ${release.version} 发布页；当前未提供 ${system.short} ${architecture} ${system.format} 安装包`
-        : `从 ${channelName} 下载 RouteDeck ${release.version} ${system.short} ${architecture} ${system.format} 安装包`);
+        : `从 ${channelName} 下载 Serylane ${release.version} ${system.short} ${architecture} ${system.format} 安装包`);
     }
     const note = domesticAvailable
       ? `国内渠道已提供 ${system.short} ${architecture} ${system.format} 安装包，GitHub 备用。`

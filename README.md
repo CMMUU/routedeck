@@ -2,9 +2,9 @@
 
 Serylane 是基于 **Mihomo** 内核、使用 Rust + Tauri 2 构建的开源桌面代理客户端，面向 Windows、macOS 和 Linux。通过中文界面管理 Clash Meta / Mihomo YAML 订阅、节点、分流规则和系统代理，并提供默认关闭的 Codex 本地兼容路由。
 
-**Serylane (formerly RouteDeck) is an open-source Mihomo desktop proxy client for Windows, macOS, and Linux.** Built with Rust and Tauri 2, it provides subscription management, proxy selection, traffic rules, system proxy controls, and optional local routing for Codex. The local router is off by default; Windows TUN support is experimental.
+**Serylane is an open-source Mihomo desktop proxy client for Windows, macOS, and Linux.** Built with Rust and Tauri 2, it provides subscription management, proxy selection, traffic rules, system proxy controls, and optional local routing for Codex. The local router is off by default; Windows TUN support is experimental.
 
-这是独立客户端项目，并非 Mihomo、Clash 或 OpenAI 的官方产品。项目曾用名 `mihomo-codex`、RouteDeck，从 0.7.4 起使用 Serylane 展示品牌。为兼容已安装版本，安装名称暂保留 `RouteDeck`，仓库、主程序与更新包地址保持不变；详见下方「更名与升级兼容」。
+这是独立客户端项目，并非 Mihomo、Clash 或 OpenAI 的官方产品。Serylane 不提供代理节点或订阅服务，需要使用你自己的订阅与配置。
 
 ## 主要功能
 
@@ -40,13 +40,13 @@ Serylane 是基于 **Mihomo** 内核、使用 Rust + Tauri 2 构建的开源桌�
 - [v0.7.3 发布说明（玻璃界面、订阅流量与可选路由）](docs/发布说明-v0.7.3.md)
 - [软件设计说明书（SDD）](docs/软件设计说明书.md)
 - [架构与里程碑](docs/架构与里程碑.md)
-- [v0.6.0 发布说明草稿（RouteDeck 更名）](docs/发布说明-v0.6.0.md)
+- [v0.6.0 发布说明](docs/发布说明-v0.6.0.md)
 - [v0.5.0 发布说明](docs/发布说明-v0.5.0.md)
 - [v0.4.0 发布说明](docs/发布说明-v0.4.0.md)
 - [规则管理与升级验证](docs/规则管理与升级验证.md)
 - [当前应用图标](assets/brand/图标说明.md)
 - [v0.3.2 发布说明](docs/发布说明-v0.3.2.md)
-- [0.3.1 更名与安装验证](docs/更名与安装验证.md)
+- [0.3.1 安装验证记录](docs/更名与安装验证.md)
 - [v0.3.1 发布说明](docs/发布说明-v0.3.1.md)
 - [0.3.0 运行验证记录](docs/运行验证记录.md)
 - [Figma UI 设计源文件](https://www.figma.com/design/aqVzL0f9upkr8BiYNCy2fu?node-id=8-2)
@@ -111,22 +111,13 @@ Serylane 是基于 **Mihomo** 内核、使用 Rust + Tauri 2 构建的开源桌�
 
 提供方接入字段依据 [官方 Codex 配置参考](https://learn.chatgpt.com/docs/config-file/config-reference)。路由仅监听 127.0.0.1，固定转发官方上游，不做 TLS 解密证书安装、不保存提示词或认证头、不跟随上游重定向。
 
-## 更名与升级兼容
+## 升级与数据兼容
 
-- **0.7.4 是展示品牌更名，不是重新安装一款不同应用。** 窗口、托盘与应用内名称改为 `Serylane`；Tauri `productName` 仍为 `RouteDeck`，主程序仍为 `routedeck.exe`（Windows），安装器、系统卸载列表和登录启动项可能仍显示 RouteDeck。这是有意保留的兼容名称，不是下载了错误软件。
-- GitHub/Gitee 仓库、`latest.json`／`latest-gitee.json` 更新入口、`RouteDeck_…` 包名与更新签名公钥均不因展示名改变；继续同版本国内优先、GitHub 备用。旧客户端会严格校验包名及来源，不能仅为统一品牌替换这些地址。历史包、签名和标签保持不变。
-- Codex 接入的 `routedeck` 提供方标识、lease 与备份格式保持不变；不会为更名扫描或重写已有 Codex 配置，不改变路由默认关闭及独立接入流程。
-- 0.6.0–0.7.3 的展示名称为 `RouteDeck`；项目／仓库、npm／Cargo 包继续使用 `routedeck`。0.3.1–0.5.0 的名称为 `mihomo-codex`。
-- 保留 `com.cmmuu.mihomodesktop` bundle identifier 及其原用户数据目录，不因品牌更名迁移或重置订阅、设置和历史版本。
-- 保留 `mihomo-tun-helper` 可执行文件和 `com.cmmuu.mihomodesktop.tun-helper` 服务／plist 标识；helper 对主程序的查找随新二进制名更新。
-- 规则导出与导入继续使用 `# mihomo-codex-rule:` 元数据前缀，以兼容旧版导出的启停、备注和排序数据。
-- 保留上述兼容身份不等于已完成所有安装器与启动项迁移验收。升级前备份数据，在方便结束重要连接时确认安装；不要同时运行旧版与 Serylane，或同时开启多个客户端的系统代理／TUN。各平台覆盖安装、快捷方式、登录启动项及 helper 授权需单独验证。
-- 以下注意事项仅针对从 **0.3.1–0.5.0 `mihomo-codex`** 迁移，不是要求现有 RouteDeck 用户为 0.7.4 更名先卸载。Windows NSIS 的卸载项以 `productName` 为键，`RouteDeck` 与旧 `mihomo-codex` 不同，不能仅凭 bundle identifier 保证自动覆盖升级。旧 `mihomo-codex` 用户应先关闭旧版登录启动并退出，备份配置，卸载旧版时不要选择删除应用数据，再安装现有客户端；确认数据正常后按需重新启用登录启动。
-- Linux DEB／RPM 的内部包名继续为 `route-deck`，不同于旧 `mihomo-codex`，也不同于主程序名 `routedeck`。从旧 `mihomo-codex` 包迁移时先卸载旧包并保留用户配置，再安装现有包，以免共享文件路径冲突。macOS 从旧 `mihomo-codex` 迁移时，已安装的旧 TUN helper 可能仍按旧主程序名查找，如不可用需重新安装／修复 helper 并验证授权；0.7.4 不改变当前 helper 标识或主程序名。
-- 历史验证记录与 Figma 原始证据仍保留旧名称；更名不代表重新完成所有平台网络验收。
-- 发布前运行 `npm run test:branding`，检查构建名称与兼容身份一致性。
-
-详细迁移注意事项见 [v0.6.0 发布说明草稿](docs/发布说明-v0.6.0.md)。
+- 应用内更新继续使用既有的发布渠道与签名校验，同版本国内优先、GitHub 备用；安装标识、更新包地址和数据目录保持兼容，不重置订阅、设置或配置历史。
+- Codex 接入备份、规则导出元数据和 TUN helper 标识保持兼容；更新不会自动接入 Codex，也不会改变路由默认关闭及独立确认流程。
+- 升级前备份数据，在方便结束重要连接时确认安装；不要同时运行多个版本，或同时开启多个客户端的系统代理／TUN。
+- 从 0.3.1–0.5.0 升级时，请先阅读 [历史版本迁移注意事项](docs/发布说明-v0.6.0.md)，按对应平台处理安装与数据保留。各平台的覆盖安装、快捷方式、登录启动项及 helper 授权需独立验证。
+- 发布前运行 `npm run test:branding`，检查展示品牌与安装、更新和数据兼容标识。
 
 ## Windows 使用说明
 

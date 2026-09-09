@@ -407,6 +407,13 @@ impl AppStorage {
         self.save_state(&state)
     }
 
+    pub fn set_desired_running(&self, desired: bool) -> AppResult<()> {
+        let mut state = self.state()?;
+        state.desired_running = desired;
+        state.updated_at = Some(Utc::now());
+        self.save_state(&state)
+    }
+
     fn ensure_layout(&self) -> AppResult<()> {
         for directory in ["profiles", "runtime", "logs", "diagnostics"] {
             let path = self.root.join(directory);
@@ -548,6 +555,32 @@ mod tests {
 
     fn temp_root() -> std::path::PathBuf {
         std::env::temp_dir().join(format!("routedeck-storage-{}", Uuid::new_v4()))
+    }
+
+    #[test]
+    fn cleanup_preserves_running_intent_but_explicit_stop_clears_it() {
+        let directory = tempfile::tempdir().expect("isolated storage");
+        let storage = AppStorage::from_root(directory.path().join("session")).unwrap();
+        let profile_id = Uuid::new_v4();
+        let revision_id = Uuid::new_v4();
+        let mut state = storage.state().unwrap();
+        assert!(!state.desired_running);
+        state.active_profile_id = Some(profile_id);
+        state.active_revision_id = Some(revision_id);
+        storage.save_state(&state).unwrap();
+        storage.set_desired_running(true).unwrap();
+        storage.mark_clean_shutdown(true).unwrap();
+        let reopened = AppStorage::from_root(directory.path().join("session")).unwrap();
+        assert!(reopened.state().unwrap().desired_running);
+        reopened.mark_clean_shutdown(false).unwrap();
+        assert!(reopened.state().unwrap().desired_running);
+        reopened.set_desired_running(false).unwrap();
+        reopened.mark_clean_shutdown(true).unwrap();
+        let stopped = reopened.state().unwrap();
+        assert!(!stopped.desired_running);
+        assert_eq!(stopped.active_profile_id, Some(profile_id));
+        assert_eq!(stopped.active_revision_id, Some(revision_id));
+        assert!(!reopened.settings().unwrap().launch_at_login);
     }
 
     #[test]

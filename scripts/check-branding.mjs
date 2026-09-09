@@ -50,6 +50,12 @@ assert.ok(read("src-tauri/src/lib.rs").includes(`product_name: "${displayName}"`
 assert.ok(read("src-tauri/src/traffic_monitor.rs").includes(`Some("${displayName}")`));
 assert.ok(read("tests/fixtures/theme-preview.html").includes(`<title>${displayName} ·`));
 assert.ok(read("tests/fixtures/theme-preview.ts").includes(`productName: "${displayName}"`));
+const introduction = read("README.md");
+assert.match(introduction, /^# Serylane /);
+assert.doesNotMatch(introduction, /formerly\s+RouteDeck|(?:原|曾用名)[^。\n]*RouteDeck/i,
+  "The project introduction uses Serylane without former-brand marketing copy");
+assert.doesNotMatch(cargo.match(/^description\s*=.*$/m)?.[0] ?? "", /RouteDeck/i,
+  "Package description uses only the current display brand");
 
 const plist = read(`src-tauri/helper/${identifier}.tun-helper.plist`);
 assert.ok(plist.includes(`<string>${identifier}</string>`));

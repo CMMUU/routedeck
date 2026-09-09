@@ -104,6 +104,7 @@ pub fn build_effective_config_with_policy(
         "mode",
         Value::String(routing_mode.as_mihomo_mode().to_string()),
     );
+    enable_selection_cache(root)?;
 
     root.remove(Value::String("tun".to_string()));
     let mut tun = Mapping::new();
@@ -139,6 +140,23 @@ pub fn build_effective_config_with_policy(
     let yaml =
         serde_yaml::to_string(&document).map_err(|error| AppError::Config(error.to_string()))?;
     Ok(EffectiveConfig { yaml, summary })
+}
+
+fn enable_selection_cache(root: &mut Mapping) -> AppResult<()> {
+    let profile = root
+        .entry(Value::String("profile".to_string()))
+        .or_insert_with(|| Value::Mapping(Mapping::new()));
+    if profile.is_null() {
+        *profile = Value::Mapping(Mapping::new());
+    }
+    let profile = profile
+        .as_mapping_mut()
+        .ok_or_else(|| AppError::Config("profile 必须是 YAML 对象".to_string()))?;
+    // Mihomo persists API group selections in its stable -d runtime directory.
+    // Keep other cache choices (especially store-fake-ip) from the source.
+    // This remembers a selection, not the health of its node or an active stream.
+    insert(profile, "store-selected", Value::Bool(true));
+    Ok(())
 }
 
 fn normalize_proxy_groups(root: &mut Mapping, summary: &mut ProfileSummary) -> AppResult<()> {
@@ -465,6 +483,72 @@ rules:
                 .and_then(Value::as_str),
             Some("global")
         );
+    }
+
+    #[test]
+    fn remembers_api_selections_in_every_network_mode() {
+        for network_mode in [
+            NetworkMode::Manual,
+            NetworkMode::SystemProxy,
+            NetworkMode::Tun,
+        ] {
+            let settings = AppSettings {
+                network_mode,
+                ..Default::default()
+            };
+            let effective = build_effective_config(SOURCE, &settings, RoutingMode::Rule).unwrap();
+            let document: Value = serde_yaml::from_str(&effective.yaml).unwrap();
+            assert_eq!(document["profile"]["store-selected"].as_bool(), Some(true));
+            assert!(document["profile"]["store-fake-ip"].is_null());
+            // Enabling persistence must not invent a successful or fixed node.
+            assert_eq!(
+                document["proxy-groups"][0]["proxies"][0].as_str(),
+                Some("sample")
+            );
+            assert!(document["proxy-groups"][0]["default-selected"].is_null());
+        }
+    }
+
+    #[test]
+    fn selection_cache_preserves_other_profile_options() {
+        for store_fake_ip in [true, false] {
+            let source = format!(
+                "{SOURCE}\nprofile:\n  store-selected: false\n  store-fake-ip: {store_fake_ip}\n"
+            );
+            let effective =
+                build_effective_config(&source, &AppSettings::default(), RoutingMode::Rule)
+                    .unwrap();
+            let document: Value = serde_yaml::from_str(&effective.yaml).unwrap();
+            assert_eq!(document["profile"]["store-selected"].as_bool(), Some(true));
+            assert_eq!(
+                document["profile"]["store-fake-ip"].as_bool(),
+                Some(store_fake_ip)
+            );
+        }
+    }
+
+    #[test]
+    fn selection_cache_accepts_empty_profile_and_is_idempotent() {
+        let source = format!("{SOURCE}\nprofile:\n");
+        let settings = AppSettings::default();
+        let first = build_effective_config(&source, &settings, RoutingMode::Rule).unwrap();
+        let second = build_effective_config(&first.yaml, &settings, RoutingMode::Rule).unwrap();
+        assert_eq!(first.yaml, second.yaml);
+        let document: Value = serde_yaml::from_str(&second.yaml).unwrap();
+        assert_eq!(document["profile"]["store-selected"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn selection_cache_rejects_malformed_profile_instead_of_dropping_it() {
+        for malformed in ["false", "[]", "unexpected"] {
+            let source = format!("{SOURCE}\nprofile: {malformed}\n");
+            let result =
+                build_effective_config(&source, &AppSettings::default(), RoutingMode::Rule);
+            assert!(
+                result.is_err(),
+                "invalid profile must not be silently replaced"
+            );
+        }
     }
 
     #[test]
