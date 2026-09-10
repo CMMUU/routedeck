@@ -43,6 +43,11 @@ for (const [route, html] of htmls) {
     const href = match[1];
     if (/^(https?:|mailto:)/.test(href)) continue;
     const target = new URL(href, origin + route);
+    if (/^\/download\/(windows|macos|linux)-(x64|arm64)$/.test(target.pathname)) {
+      assert.ok(!target.search || target.search === '?channel=github');
+      checkedLinks++;
+      continue;
+    }
     const plainRoute = target.pathname.replace(/index\.html$/, '').replace(/\.html$/, '');
     let targetHtml = htmls.get(plainRoute);
     if (!targetHtml) {
@@ -58,9 +63,15 @@ const sitemap = await readFile(join(root, 'sitemap.xml'), 'utf8');
 for (const route of htmls.keys()) if (route !== '/404') assert.ok(sitemap.includes(`<loc>${origin}${route}</loc>`), `Sitemap omits ${route}`);
 assert.ok(!(sitemap.includes('/404')));
 assert.match(await readFile(join(root, 'robots.txt'), 'utf8'), /Sitemap: https:\/\/serylane\.cmmuu\.com\/sitemap\.xml/);
-assert.doesNotMatch(await readFile(join(root, 'site.js'), 'utf8'), /\b(?:fetch|XMLHttpRequest|WebSocket|invoke)\s*\(/, 'Website must not contact proxy or desktop services');
+const script = await readFile(join(root, 'site.js'), 'utf8');
+assert.doesNotMatch(script, /\b(?:XMLHttpRequest|WebSocket|invoke|EventSource)\s*\(|127\.0\.0\.1|localhost|__TAURI__|localStorage|sessionStorage/, 'Website must not contact proxy, storage or desktop services');
+assert.equal([...script.matchAll(/\bfetch\s*\(/g)].length, 1);
+assert.match(script, /fetch\("\/api\/releases\/latest",/);
+assert.doesNotMatch(script, /version:\s*["']v\d+\./, 'No pinned release snapshot');
 const config = JSON.parse(await readFile(new URL('../wrangler.jsonc', import.meta.url), 'utf8'));
 assert.deepEqual(config.routes, [{ pattern: 'serylane.cmmuu.com', custom_domain: true }]);
 assert.equal(config.assets.not_found_handling, '404-page');
 assert.equal(config.workers_dev, false);
+assert.deepEqual(config.assets.run_worker_first, ['/api/*', '/download/*']);
+assert.equal(config.assets.binding, 'ASSETS');
 console.log(`PASS: ${htmls.size} HTML pages, ${checkedLinks} local links/assets, canonical URLs, sitemap, JSON-LD, safety and deployment scope.`);

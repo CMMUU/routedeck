@@ -128,17 +128,17 @@ class SyncTests(unittest.TestCase):
                 job = sync.Sync("serylane", SimpleNamespace(fork=lambda: None),
                                 SimpleNamespace(fork=lambda: None), self.fixture(),
                                 transfer_workers=workers)
-                names = [*sorted(sync.UPDATER_MANIFESTS), "Serylane_0.7.7_x64-setup.exe",
+                names = [*sorted(sync.RELEASE_MANIFESTS), "Serylane_0.7.7_x64-setup.exe",
                          "Serylane_0.7.7_x64-setup.exe.sig", "SHA256SUMS.txt"]
                 seen = []
                 def record(self, release_id, item):
-                    if item["name"] in sync.UPDATER_MANIFESTS:
-                        self_test.assertTrue(set(names) - sync.UPDATER_MANIFESTS <= set(seen))
+                    if item["name"] in sync.RELEASE_MANIFESTS:
+                        self_test.assertTrue(set(names) - sync.RELEASE_MANIFESTS <= set(seen))
                     seen.append(item["name"])
                 self_test = self
                 with patch.object(sync.Sync, "ensure_attachment", record):
                     job.transfer_attachments(1, [{"name": name} for name in names])
-                self.assertEqual(set(seen[-4:]), sync.UPDATER_MANIFESTS)
+                self.assertEqual(set(seen[-5:]), sync.RELEASE_MANIFESTS)
                 self.assertEqual(len(seen), len(names))
                 seen.clear()
                 def fail(self, release_id, item):
@@ -147,7 +147,7 @@ class SyncTests(unittest.TestCase):
                 with patch.object(sync.Sync, "ensure_attachment", fail):
                     with self.assertRaises(sync.SyncError):
                         job.transfer_attachments(1, [{"name": name} for name in names])
-                self.assertFalse(set(seen) & sync.UPDATER_MANIFESTS)
+                self.assertFalse(set(seen) & sync.RELEASE_MANIFESTS)
 
     def test_git_push_and_auth_failures_are_not_retried_or_exposed(self):
         for operation, stderr, expected in (("push", "TLS connection reset secret-token", "transient network"),

@@ -1,6 +1,6 @@
 # Serylane 官网
 
-基于已确认的三段磨砂玻璃设计实现，原生 HTML / CSS / JavaScript，无框架、第三方字体、分析脚本或客户端构建依赖。Cloudflare Workers Static Assets 托管；只上传 `public/`，不上传桌面程序源码、用户配置或密钥。
+基于已确认的三段磨砂玻璃设计实现，原生 HTML / CSS / JavaScript，无框架、第三方字体、分析脚本或客户端构建依赖。Cloudflare Workers Static Assets 托管；上传 `public/` 和公开发布查询 Worker，不上传桌面程序源码、用户配置或密钥。
 
 官网：<https://serylane.cmmuu.com/>。已于 **2026-09-08** 部署至 Cloudflare Workers Static Assets，首页与四篇文档 HTTPS 200、未知路径 404、`.html` 归一化 307、robots 和 sitemap 均已通过线上请求验收。首次边缘访问曾短暂超时，复核后上述页面均正常；本记录不代表持续可用性监控或搜索引擎已收录。
 
@@ -43,33 +43,40 @@ CI 仅检查，不存储 Cloudflare 凭据，也不会自动登录或部署。�
 
 对于已经绑定正确域名的官网，更新静态资源优先使用 `wrangler versions upload --keep-vars`，再将返回的准确版本 ID 以 `wrangler versions deploy <VERSION_ID>@100` 上线；先执行 `versions upload --dry-run`。已核对 Wrangler 4.129.0：该路径不运行域名／路由触发器部署，不需要再次绑定域名。不要使用 `triggers deploy` 或覆盖选项来发布普通页面更新。新部署后再次核对公共页面和下载链接，记录版本 ID 以便回滚。
 
-## 下载快照与更新
+## 动态下载与发布契约
 
-当前源码下载快照为 **2026-09-08 核验的 v0.7.6**。GitHub Release `384478083` 已于 14:01（UTC+8）正式发布，30 附件齐全；六个主包均返回 HEAD 200，Content-Length 与 Release API 的资产大小一致。国内镜像尚未就绪：截至 **2026-09-08 14:04（UTC+8）**，精确标签 API 返回 HTTP 200 但正文为 `null`，六个主包均返回 404、无有效 Content-Length。不能宣称国内镜像可用。这是下载可用性与元数据核验，不代表在本次检查中下载大包执行了独立哈希校验。
+已于 **2026-09-10** 使用版本上传／部署上线，当前 Worker 版本 `e032654d-5513-40f7-96db-6abbac00b55b`（100%），未更改域名或 DNS。线上动态查询、Gitee 主下载、同版本 GitHub 回退及独立 GitHub 入口已经实测；桌面 1440px、手机 390px、无 JavaScript 及模拟查询失败／重试完成检查。上游在验收期间存在间歇性超时，不能将一次渠道验证当作长期可用保证；有限诊断代码通过 `X-Serylane-Error` / `X-Serylane-Mirror` 返回，不包含请求内容或签名下载 URL。
 
-| 主包文件名 | GitHub 大小（字节） | 本次 Gitee HEAD |
-| --- | ---: | --- |
-| `RouteDeck_0.7.6_x64-setup.exe` | 17,894,254 | 404，未就绪 |
-| `RouteDeck_0.7.6_arm64-setup.exe` | 15,146,861 | 404，未就绪 |
-| `RouteDeck_0.7.6_x64.dmg` | 27,512,923 | 404，未就绪 |
-| `RouteDeck_0.7.6_aarch64.dmg` | 25,177,200 | 404，未就绪 |
-| `RouteDeck_0.7.6_amd64.AppImage` | 100,563,448 | 404，未就绪 |
-| `RouteDeck_0.7.6_aarch64.AppImage` | 97,114,632 | 404，未就绪 |
+页面主体继续使用静态资源；只有 `/api/*` 与 `/download/*` 先进入 Worker，其他路径由 Static Assets 处理。没有数据库、登录、分析脚本、代理探测或桌面接管。
 
-有同版本、同架构、同格式的国内主包时，将国内直链置为主要操作；其余情况明确提示缺失，主要操作改为已核验 GitHub 包。不会静默换成另一个版本或格式。
+- `GET /api/releases/latest`：查询当前最新正式版、六个主包的名称/大小/SHA-256、各包国内渠道的元数据与 HEAD 检查结果。页面展示可能早于下一次发布，因此只用于说明。
+- `GET /download/{windows|macos|linux}-{x64|arm64}`：**每次点击重新解析** GitHub 官方 `releases/latest` 的正式版跳转，固定该标签，核对发布清单和校验清单。国内同标签就绪且所选包 HEAD 大小匹配才 302；否则检查并转向同版本 GitHub 包。
+- 加上精确参数 `?channel=github` 可跳过国内渠道。无 JavaScript 时仍可使用 Windows x64 的动态入口。
+- 查询、跳转、错误响应均为 `no-store`；不读旧版本缓存，不把旧包冒充最新版。未知目标/参数被拒绝，不接受用户传入下载 URL。
+- 元数据最多 256 KiB；固定 HTTPS 上游/发行 CDN 白名单、最多五跳；查询总超时 12 秒，国内检查 4 秒，GitHub 包 HEAD 5 秒。安装包交由浏览器从官方渠道下载，Worker 不下载或缓存大包。
+- GitHub 最新标签通过公开跳转解析，不依赖匿名 REST API 的共享配额；仍受上游网络、服务可用性及其自身发布元数据传播影响。“最新”指本次查询时 GitHub 指定的正式发行版，未发布源码不计入。
+- 渠道检查是版本/清单字节/文件大小检查，不是每次点击重下安装包验算哈希；镜像流水线负责逐包哈希验证。浏览器已经跳转、开始传输后，不能跨渠道无缝续传；可返回选择 GitHub 备用。
 
-当前六个主包均以 GitHub 为主操作，并明确提示当前所选国内包暂缺、保留国内发布页入口。无 JavaScript 时保留已核验的 Windows x64 GitHub EXE 直链，禁用无法工作的系统与架构选择器。这里是人工核验快照，不会自动探测镜像后续上传进度；更新国内可用集合前仍须复核具体链接。离线测试另外在 VM 内模拟国内包全部缺失或仅部分可用，持续验证格式提示、GitHub 回退和主操作 DOM 顺序，不向生产代码增加测试接口。
+### 新版本自动接入
 
-新版本发布后，必须先核对 GitHub Release、Gitee API、具体文件的 HEAD 状态及大小，再同步修改 `public/site.js` 的 release 快照、首页无 JavaScript 降级链接/版本文字和 `scripts/test-downloads.mjs` 的独立预期值。未发布的源码版本、标签或存在的签名文件，不是包已存在的证据。国内链接不齐时不谎报镜像成功。
+`scripts/publish_github_release.py` 从 v0.7.7 起，在主包齐全且更新签名校验通过后生成 `downloads.json`（schemaVersion、v 前缀版本、六个目标的 filename/size/sha256）。该清单纳入 `SHA256SUMS.txt`；全部附件上传并验证后才将 draft 发布为正式版。官网不需要修改版本号或重新部署。
 
-对外页面只使用 Serylane 品牌；真实安装包文件名、仓库 URL、更新清单及签名身份保持兼容。
+Gitee 同步把 `downloads.json` 与四份更新清单放在所有普通附件验证完成后的屏障后上传。清理旧附件时先撤下清单。镜像没同步完时官网使用 GitHub **同版本**，不使用旧的 Gitee 最新版。此变更不修改保留历史的范围或触发新应用版本发布。
+
+已正式发布的 v0.7.6 没有新清单，因此兼容读取其原始 `latest.json` 和 `SHA256SUMS.txt`；DMG 大小通过 GitHub HEAD 补齐。不改历史附件、文件名或签名。从下一版起缺少新清单视为未就绪，返回 503。
+
+### 测试
+
+`pnpm test` 覆盖六个系统/架构组合、键盘选择、异步加载/失败/重试、无 JavaScript 链接；Worker 测试覆盖发布切换、镜像滞后/部分可用/超时/清单不一致、错误大小、缺包、预发布、恶意跳转和无缓存响应。`pnpm typecheck` 生成 Cloudflare 运行时类型并检查 TypeScript。Python 发布与镜像测试验证清单生成和上传屏障。
+
+本地静态预览不提供动态接口，会显示查询失败；真实接口测试用 Wrangler。本任务不安装或重启桌面应用，不切换系统代理。
 
 ## SEO 与安全
 
 - 首页和四篇文档拥有独立标题、描述与精确 canonical；真实语义 HTML 可直接读取，不依赖 JavaScript 生成正文。
 - 包含 robots、sitemap、Open Graph、Twitter 摘要卡及 SoftwareApplication JSON-LD，无虚构评分、下载量或稳定性指标。
 - 404 返回真实错误状态并使用 noindex；`.html` 文档路径由 Cloudflare 归一化到无扩展 canonical。
-- 严格 CSP：不连接外部 API 或本地代理，不执行内联脚本或第三方脚本；网站没有登录、上传、支付或接管程序功能。
+- 严格 CSP：浏览器仅允许同源发布查询，不连接外部 API 或本地代理，不执行内联脚本或第三方脚本；网站没有登录、上传、支付或接管程序功能。
 - 正文即时重新验证缓存，PNG 标志缓存一天；不对未带内容哈希的文件设置 immutable。
 - 可被抓取不等于已被 Google 收录。上线后仍需域名所有者在 Search Console 验证站点并提交 sitemap；不得声称已提交或保证排名。
 - 线上 robots 会叠加当前 Cloudflare 托管内容信号：普通搜索允许抓取，部分 AI 爬虫被阻止，项目 sitemap 仍保留。本次未修改这些区域级安全/爬虫设置。

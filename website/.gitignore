@@ -3,3 +3,4 @@ node_modules/
 .dev.vars*
 .env*
 dist/
+worker-configuration.d.ts

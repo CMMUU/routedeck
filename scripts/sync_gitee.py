@@ -21,6 +21,9 @@ from urllib.request import Request, HTTPRedirectHandler, build_opener
 import uuid
 from updater_release import UPDATER_MANIFESTS
 
+# Website readiness marker follows the same verified-file barrier as updater manifests.
+RELEASE_MANIFESTS = UPDATER_MANIFESTS | {"downloads.json"}
+
 # Both canonical repositories now use the product slug. Legacy migration below
 # is opt-in and bound to the original numeric repository identities.
 SOURCE_REPOS = {"serylane": "serylane"}
@@ -692,7 +695,7 @@ class Sync:
         if (target.get("id"), target.get("tag_name"), target.get("prerelease")) != (
                 group["target"]["id"], group["source"]["tag_name"], False):
             raise SyncError("Destination release changed before cleanup")
-        for item in sorted(group["assets"], key=lambda row: (row["target"]["name"] not in UPDATER_MANIFESTS, row["target"]["name"])):
+        for item in sorted(group["assets"], key=lambda row: (row["target"]["name"] not in RELEASE_MANIFESTS, row["target"]["name"])):
             asset = item["target"]
             if not re.fullmatch(r"[0-9a-f]{64}", item.get("sha256", "")):
                 raise SyncError("No verified byte-identical GitHub backup; refusing deletion")
@@ -815,7 +818,7 @@ class Sync:
         print(f"Verified Gitee attachment: {item['name']}", flush=True)
 
     def transfer_attachments(self, release_id, files):
-        manifests = UPDATER_MANIFESTS
+        manifests = RELEASE_MANIFESTS
         regular = sorted((item for item in files if item["name"] not in manifests), key=lambda item: item["name"])
         if self.transfer_workers == 1:
             for item in regular:

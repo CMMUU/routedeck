@@ -1,6 +1,6 @@
 "use strict";
 
-// This website is static. It never invokes desktop APIs, opens local listeners,
+// Only public release metadata is fetched from this site's Worker. Never invoke desktop APIs, open local listeners,
 // accesses a subscription, saves a proxy configuration, or connects to Codex.
 (() => {
   const menuButton = document.querySelector(".menu-toggle");
@@ -30,18 +30,8 @@
     macos: { name: "macOS", short: "macOS", icon: "apple", format: "DMG", defaultArchitecture: "arm64" },
     linux: { name: "Linux · AppImage", short: "Linux", icon: "linux", format: "AppImage", defaultArchitecture: "x64" },
   };
-  // Verified release snapshot, 2026-09-08 06:04 UTC. All six GitHub main packages
-  // returned HTTP 200 with matching size; all six Gitee main packages returned 404.
-  // A source version or tag must never be used as evidence of a released file.
-  const release = {
-    version: "v0.7.6",
-    files: {
-      windows: { x64: "RouteDeck_0.7.6_x64-setup.exe", arm64: "RouteDeck_0.7.6_arm64-setup.exe" },
-      macos: { x64: "RouteDeck_0.7.6_x64.dmg", arm64: "RouteDeck_0.7.6_aarch64.dmg" },
-      linux: { x64: "RouteDeck_0.7.6_amd64.AppImage", arm64: "RouteDeck_0.7.6_aarch64.AppImage" },
-    },
-    domesticAvailable: new Set([]),
-  };
+  let release = null;
+  let loading = true;
   let selectedSystem = "windows";
   let selectedArchitecture = "x64";
   function updateDownloadSelection() {
@@ -60,35 +50,33 @@
       button.disabled = false;
       button.setAttribute("aria-pressed", String(button.dataset.architecture === selectedArchitecture));
     });
-    const filename = release.files[selectedSystem][selectedArchitecture];
-    const domesticAvailable = release.domesticAvailable.has(`${selectedSystem}:${selectedArchitecture}`);
+    const target = `${selectedSystem}-${selectedArchitecture}`;
+    const asset = release?.assets[target];
+    const domesticAvailable = asset?.domesticAvailable === true;
     const github = document.querySelector("#download-github");
     const gitee = document.querySelector("#download-gitee");
-    github.href = `https://github.com/CMMUU/serylane/releases/download/${release.version}/${filename}`;
-    gitee.href = domesticAvailable
-      ? `https://gitee.com/cmmuu/serylane/releases/download/${release.version}/${filename}`
-      : `https://gitee.com/cmmuu/serylane/releases/tag/${release.version}`;
-    github.querySelector("span").textContent = domesticAvailable ? "GitHub 备用" : `GitHub 下载 · ${system.format}`;
-    gitee.querySelector("span").textContent = domesticAvailable ? `国内下载 · ${system.format}` : "查看 Gitee 发布";
-    github.classList.toggle("button-primary", !domesticAvailable);
-    github.classList.toggle("button-secondary", domesticAvailable);
-    gitee.classList.toggle("button-primary", domesticAvailable);
-    gitee.classList.toggle("button-secondary", !domesticAvailable);
+    // These URLs always resolve again on click, even if this page was left open before a release.
+    github.href = `/download/${target}?channel=github`;
+    gitee.href = `/download/${target}`;
+    github.querySelector("span").textContent = "GitHub 备用";
+    gitee.querySelector("span").textContent = `下载最新版 · ${system.format}`;
     const links = document.querySelector(".release-links");
-    // Keep DOM, visual and keyboard order aligned with the available channel.
-    links.append(...(domesticAvailable ? [gitee, github] : [github, gitee]));
-    for (const [link, channelName] of [[gitee, "Gitee"], [github, "GitHub"]]) {
+    links.append(gitee, github);
+    for (const [link, channelName] of [[gitee, "国内优先、GitHub 备用"], [github, "GitHub"]]) {
       link.dataset.system = selectedSystem;
       link.dataset.architecture = selectedArchitecture;
-      link.setAttribute("aria-label", link === gitee && !domesticAvailable
-        ? `查看 Gitee ${release.version} 发布页；当前未提供 ${system.short} ${architecture} ${system.format} 安装包`
-        : `从 ${channelName} 下载 Serylane ${release.version} ${system.short} ${architecture} ${system.format} 安装包`);
+      link.setAttribute("aria-label", `下载最新正式版 Serylane ${system.short} ${architecture} ${system.format} 安装包，${channelName}，点击时重新核对版本`);
     }
-    const note = domesticAvailable
-      ? `国内渠道已提供 ${system.short} ${architecture} ${system.format} 安装包，GitHub 备用。`
-      : `国内镜像暂缺 ${system.short} ${architecture} ${system.format} 安装包，请使用 GitHub。`;
+    const note = !release
+      ? "国内优先，GitHub 备用；点击下载时会独立核对最新版本与渠道。"
+      : domesticAvailable
+        ? `已核对国内 ${system.short} ${architecture} ${system.format} 包；点击时再次确认，异常时转 GitHub。`
+        : `暂未确认国内 ${system.short} ${architecture} ${system.format} 包；点击时重新检查，未就绪则转 GitHub 同版本包。`;
+    document.querySelector("#release-status").textContent = loading ? "正在查询最新正式版…"
+      : release ? `当前最新正式版 ${release.version}。点击时再次核对版本。`
+        : "暂时无法确认最新正式版。可重试查询，或点击下载重新检查；不会静默下载旧版。";
     document.querySelector("#channel-note").textContent = note;
-    document.querySelector("#download-selection").textContent = `已选择 ${system.short} ${architecture}，${system.format} 安装包，${release.version}。${note}`;
+    document.querySelector("#download-selection").textContent = `已选择 ${system.short} ${architecture}，${system.format} 安装包。${document.querySelector("#release-status").textContent} ${note}`;
   }
   function selectSystem(system, moveFocus = false) {
     if (!Object.hasOwn(systems, system)) return;
@@ -117,4 +105,23 @@
   }));
   document.querySelectorAll("[data-select-windows]").forEach(link => link.addEventListener("click", () => selectSystem("windows")));
   updateDownloadSelection();
+  async function refreshRelease() {
+    if (!loading) { loading = true; release = null; updateDownloadSelection(); }
+    const retry = document.querySelector("#release-retry");
+    retry.hidden = false;
+    retry.disabled = true;
+    try {
+      const response = await fetch("/api/releases/latest", { cache: "no-store", credentials: "omit", signal: AbortSignal.timeout(20000) });
+      if (!response.ok) throw new Error("Release unavailable");
+      const data = await response.json();
+      if (!/^v\d+\.\d+\.\d+$/.test(data.version) || !data.assets) throw new Error("Invalid release");
+      for (const system of Object.keys(systems)) for (const architecture of ["x64", "arm64"]) {
+        if (typeof data.assets[`${system}-${architecture}`]?.domesticAvailable !== "boolean") throw new Error("Incomplete release");
+      }
+      release = data;
+    } catch { release = null; }
+    finally { loading = false; retry.disabled = false; retry.hidden = !!release; updateDownloadSelection(); }
+  }
+  document.querySelector("#release-retry").addEventListener("click", refreshRelease);
+  void refreshRelease();
 })();

@@ -5,12 +5,14 @@
   "type": "module",
   "scripts": {
     "check": "node scripts/check-site.mjs",
-    "test": "node scripts/check-site.mjs && node scripts/test-downloads.mjs",
+    "test": "node scripts/check-site.mjs && node scripts/test-downloads.mjs && node --test scripts/test-worker.mjs",
+    "typecheck": "wrangler types && tsc --noEmit",
     "dev": "node scripts/serve.mjs",
     "deploy:check": "wrangler deploy --dry-run",
-    "deploy": "node scripts/check-site.mjs && node scripts/test-downloads.mjs && wrangler deploy"
+    "deploy": "pnpm test && pnpm typecheck && wrangler deploy"
   },
   "devDependencies": {
+    "typescript": "5.6.3",
     "wrangler": "4.129.0"
   }
 }

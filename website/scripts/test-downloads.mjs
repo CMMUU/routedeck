@@ -1,25 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { runInNewContext } from 'node:vm';
-
 const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
 const script = await readFile(new URL('../public/site.js', import.meta.url), 'utf8');
-
-// Independent, publicly verified 2026-09-08 release snapshot. These tests are
-// offline: changing the release requires checking the remote assets again.
-const version = 'v0.7.6';
-const githubBase = `https://github.com/CMMUU/serylane/releases/download/${version}/`;
-const giteeBase = `https://gitee.com/cmmuu/serylane/releases/download/${version}/`;
-const giteeRelease = `https://gitee.com/cmmuu/serylane/releases/tag/${version}`;
-const downloads = [
-  { system: 'windows', architecture: 'x64', short: 'Windows', name: 'Windows 10 / 11', icon: 'windows', format: 'EXE', filename: 'RouteDeck_0.7.6_x64-setup.exe', domestic: false },
-  { system: 'windows', architecture: 'arm64', short: 'Windows', name: 'Windows 10 / 11', icon: 'windows', format: 'EXE', filename: 'RouteDeck_0.7.6_arm64-setup.exe', domestic: false },
-  { system: 'macos', architecture: 'x64', short: 'macOS', name: 'macOS', icon: 'apple', format: 'DMG', filename: 'RouteDeck_0.7.6_x64.dmg', domestic: false },
-  { system: 'macos', architecture: 'arm64', short: 'macOS', name: 'macOS', icon: 'apple', format: 'DMG', filename: 'RouteDeck_0.7.6_aarch64.dmg', domestic: false },
-  { system: 'linux', architecture: 'x64', short: 'Linux', name: 'Linux · AppImage', icon: 'linux', format: 'AppImage', filename: 'RouteDeck_0.7.6_amd64.AppImage', domestic: false },
-  { system: 'linux', architecture: 'arm64', short: 'Linux', name: 'Linux · AppImage', icon: 'linux', format: 'AppImage', filename: 'RouteDeck_0.7.6_aarch64.AppImage', domestic: false },
-];
-
 // Read actual markup, rather than duplicating its attributes in a fake fixture.
 // This deliberately supports only the small DOM surface used by site.js; an
 // unexpected selector fails instead of silently masking a production change.
@@ -46,7 +29,7 @@ const systemTags = tagged(tag => Object.hasOwn(tag.attributes, 'data-system'));
 const architectureTags = tagged(tag => Object.hasOwn(tag.attributes, 'data-architecture'));
 const releaseLinks = html.match(/<div\b[^>]*class="release-links"[^>]*>([\s\S]*?)<\/div>/)?.[1] ?? '';
 
-function createPage(source = script) {
+function createPage(fetchResult) {
   const page = { activeElement: null };
   function element({ tag = 'span', attributes = {} } = {}) {
     const attrs = new Map(Object.entries(attributes));
@@ -79,7 +62,7 @@ function createPage(source = script) {
     };
   }
   const selectors = new Map();
-  for (const id of ['main-nav', 'platform-name', 'download-panel', 'download-github', 'download-gitee', 'channel-note', 'download-selection']) {
+  for (const id of ['main-nav', 'platform-name', 'download-panel', 'download-github', 'download-gitee', 'channel-note', 'download-selection', 'release-status', 'release-retry']) {
     selectors.set(`#${id}`, element(byId(id)));
   }
   selectors.set('.menu-toggle', element(oneTag(tag => hasClass(tag, 'menu-toggle'))));
@@ -106,170 +89,92 @@ function createPage(source = script) {
   const forbidden = () => assert.fail('The static website must not call network, storage or desktop APIs');
   const window = { matchMedia: () => ({ addEventListener() {} }), open: forbidden, fetch: forbidden };
   for (const name of ['__TAURI__', 'localStorage', 'sessionStorage']) Object.defineProperty(window, name, { get: forbidden });
-  runInNewContext(source, {
-    document, window, fetch: forbidden, XMLHttpRequest: forbidden, WebSocket: forbidden,
+  runInNewContext(script, {
+    document, window, AbortSignal, fetch: async (url, options) => {
+      assert.equal(url, '/api/releases/latest');
+      assert.equal(options.cache, 'no-store');
+      assert.equal(options.credentials, 'omit');
+      return fetchResult();
+    }, XMLHttpRequest: forbidden, WebSocket: forbidden,
     EventSource: forbidden, navigator: { sendBeacon: forbidden },
   }, { filename: 'website/public/site.js', timeout: 1_000 });
   return { page, query, tabs, architectures, windowsLinks, github, gitee };
 }
 
-function assertSelection(view, expected) {
-  const { system, architecture, short, name, icon, format, filename, domestic } = expected;
-  const label = `${short} ${architecture === 'arm64' ? 'ARM64' : 'x64'} ${format} 安装包`;
-  assert.equal(view.github.href, githubBase + filename, `${system}/${architecture}: exact GitHub asset`);
-  assert.equal(view.gitee.href, domestic ? giteeBase + filename : giteeRelease, `${system}/${architecture}: verified Gitee asset or release fallback`);
-  assert.equal(view.query('#platform-name').textContent, name);
-  assert.equal(view.query('#platform-icon use').getAttribute('href'), `#i-${icon}`);
-  assert.equal(view.query('#download-panel').getAttribute('aria-labelledby'), `tab-${system}`);
+const targets = ['windows-x64', 'windows-arm64', 'macos-x64', 'macos-arm64', 'linux-x64', 'linux-arm64'];
+const data = { version: 'v9.2.1', assets: Object.fromEntries(targets.map(t => [t, { domesticAvailable: t.startsWith('windows') }])) };
+const flush = () => new Promise(resolve => setTimeout(resolve, 0));
+function verifySelection(view, target) {
+  const [system, architecture] = target.split('-');
+  assert.equal(view.gitee.href, '/download/' + target);
+  assert.equal(view.github.href, '/download/' + target + '?channel=github');
+  assert.deepEqual(view.query('.release-links').children, [view.gitee, view.github]);
+  assert.equal(view.gitee.classList.contains('button-primary'), true);
+  assert.equal(view.github.classList.contains('button-secondary'), true);
+  assert.equal(view.query('#download-panel').getAttribute('aria-labelledby'), 'tab-' + system);
   for (const tab of view.tabs) {
-    const selected = tab.dataset.system === system;
     assert.equal(tab.disabled, false);
-    assert.equal(tab.getAttribute('aria-selected'), String(selected));
-    assert.equal(tab.tabIndex, selected ? 0 : -1, 'Only selected system is in the Tab sequence');
+    assert.equal(tab.getAttribute('aria-selected'), String(tab.dataset.system === system));
+    assert.equal(tab.tabIndex, tab.dataset.system === system ? 0 : -1);
   }
-  for (const button of view.architectures) {
-    assert.equal(button.disabled, false);
-    assert.equal(button.getAttribute('aria-pressed'), String(button.dataset.architecture === architecture));
-  }
-  const primary = domestic ? view.gitee : view.github;
-  const secondary = domestic ? view.github : view.gitee;
-  assert.deepEqual(view.query('.release-links').children, [primary, secondary], 'Primary action comes first in DOM and keyboard order');
+  for (const button of view.architectures) assert.equal(button.getAttribute('aria-pressed'), String(button.dataset.architecture === architecture));
   for (const link of [view.github, view.gitee]) {
-    assert.equal(link.classList.contains('button-primary'), link === primary);
-    assert.equal(link.classList.contains('button-secondary'), link === secondary);
-    assert.equal(link.dataset.system, system);
-    assert.equal(link.dataset.architecture, architecture);
     assert.equal(link.getAttribute('target'), '_blank');
-    assert.match(link.getAttribute('rel'), /\bnoopener\b/);
-    assert.match(link.getAttribute('rel'), /\bnoreferrer\b/);
+    assert.match(link.getAttribute('rel'), /noopener/);
+    assert.match(link.getAttribute('aria-label'), /点击时重新核对版本/);
   }
-  assert.equal(view.github.querySelector('span').textContent, domestic ? 'GitHub 备用' : `GitHub 下载 · ${format}`);
-  assert.equal(view.gitee.querySelector('span').textContent, domestic ? `国内下载 · ${format}` : '查看 Gitee 发布');
-  assert.equal(view.github.getAttribute('aria-label'), `从 GitHub 下载 Serylane ${version} ${label}`);
-  assert.equal(view.gitee.getAttribute('aria-label'), domestic
-    ? `从 Gitee 下载 Serylane ${version} ${label}`
-    : `查看 Gitee ${version} 发布页；当前未提供 ${label}`);
-  const note = domestic ? `国内渠道已提供 ${label}，GitHub 备用。` : `国内镜像暂缺 ${label}，请使用 GitHub。`;
-  assert.equal(view.query('#channel-note').textContent, note, 'Missing mirror notice names the specific package format');
-  assert.equal(view.query('#download-selection').textContent,
-    `已选择 ${short} ${architecture === 'arm64' ? 'ARM64' : 'x64'}，${format} 安装包，${version}。${note}`);
 }
-
-let checks = 0;
-function check(name, run) { run(); checks++; console.log(`PASS: ${name}`); }
-const expectedSelection = (system, architecture) => downloads.find(item => item.system === system && item.architecture === architecture);
-
-check('No-JavaScript HTML offers verified GitHub Windows x64, a domestic release fallback and disabled selectors', () => {
-  assert.deepEqual(systemTags.map(tag => tag.attributes['data-system']), ['windows', 'macos', 'linux']);
-  assert.deepEqual(architectureTags.map(tag => tag.attributes['data-architecture']), ['x64', 'arm64']);
-  for (const tag of [...systemTags, ...architectureTags]) {
-    assert.equal(tag.tag, 'button');
-    assert.ok(Object.hasOwn(tag.attributes, 'disabled'));
-  }
-  assert.equal(byId('tab-windows').attributes['aria-selected'], 'true');
-  for (const id of ['tab-macos', 'tab-linux']) {
-    assert.equal(byId(id).attributes['aria-selected'], 'false');
-    assert.equal(byId(id).attributes.tabindex, '-1');
-  }
-  assert.equal(architectureTags[0].attributes['aria-pressed'], 'true');
-  assert.equal(architectureTags[1].attributes['aria-pressed'], 'false');
-  assert.equal(byId('download-github').attributes.href, githubBase + downloads[0].filename);
-  assert.equal(byId('download-gitee').attributes.href, giteeRelease);
-  assert.ok(hasClass(byId('download-github'), 'button-primary'));
-  assert.ok(hasClass(byId('download-gitee'), 'button-secondary'));
-  assert.deepEqual([...releaseLinks.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]), ['download-github', 'download-gitee']);
-  assert.equal(byId('download-github').attributes['aria-label'], `从 GitHub 下载 Serylane ${version} Windows x64 EXE 安装包`);
-  assert.equal(byId('download-gitee').attributes['aria-label'], `查看 Gitee ${version} 发布页；当前未提供 Windows x64 EXE 安装包`);
-  assert.match(contentById('download-gitee'), /<span>查看 Gitee 发布<\/span>/);
-  assert.match(contentById('download-github'), /<span>GitHub 下载 · EXE<\/span>/);
-  assert.equal(contentById('platform-name'), 'Windows 10 / 11');
-  assert.match(contentById('platform-icon'), /<use href="#i-windows"/);
-  assert.equal(byId('download-panel').attributes['aria-labelledby'], 'tab-windows');
-  assert.equal(byId('download-selection').attributes['aria-live'], 'polite');
-  assert.match(contentById('download-selection'), /Windows x64，EXE 安装包/);
-  assert.ok(contentById('download-selection').includes(version));
-  const fallback = html.match(/<noscript>([\s\S]*?)<\/noscript>/)?.[1] ?? '';
-  assert.match(fallback, /Windows x64/);
-  assert.match(fallback, /JavaScript/);
-  assert.ok(fallback.includes(`href="https://github.com/CMMUU/serylane/releases/tag/${version}"`));
-  assert.equal(contentById('channel-note'), '国内镜像暂缺 Windows x64 EXE 安装包，请使用 GitHub。');
-});
-
-check('Both route illustrations are off, unattached and non-interactive', () => {
-  const previews = [...html.matchAll(/<figure\b([^>]*)>([\s\S]*?)<\/figure>/g)]
-    .filter(([, attributes]) => /class="(?:app-preview|route-preview)"/.test(attributes));
-  assert.equal(previews.length, 2);
-  for (const [, , content] of previews) {
-    assert.match(content, /已关闭/);
-    assert.match(content, /未接入/);
-    assert.match(content, /界面示意 · 非实时状态/);
-    assert.doesNotMatch(content, /<(?:a|button|input|select|textarea|form)\b|\btabindex\s*=|\bon\w+\s*=|role="(?:button|switch|checkbox)"/i);
-    assert.match(content, /class="illustrated-switch" aria-hidden="true"/);
-  }
-  assert.match(html, /保存设置不会启动服务，也不会接入 Codex。/);
-  assert.doesNotMatch(script, /\b(?:fetch|XMLHttpRequest|WebSocket|EventSource|invoke|sendBeacon)\s*\(|__TAURI__/);
-});
-
-check('Six platform/architecture combinations use exact verified URLs, labels and primary DOM order', () => {
-  const view = createPage();
-  assertSelection(view, downloads[0]);
-  for (const expected of downloads) {
-    view.query(`#tab-${expected.system}`).dispatch('click');
-    view.architectures.find(button => button.dataset.architecture === expected.architecture).dispatch('click');
-    assertSelection(view, expected);
-  }
-});
-
-check('Simulated missing domestic packages still fall back to exact GitHub assets and format-specific notices', () => {
-  // Alter only the in-memory fixture, not the shipped code or its public API.
-  // Keep testing the fallback even when all packages in this snapshot exist.
-  const availability = /domesticAvailable:\s*new Set\(\[[\s\S]*?\]\)/g;
-  assert.equal([...script.matchAll(availability)].length, 1, 'Expected one release availability fixture');
-  for (const available of [[], ['windows:arm64', 'macos:arm64']]) {
-    const source = script.replace(availability, `domesticAvailable: new Set(${JSON.stringify(available)})`);
-    const view = createPage(source);
-    assertSelection(view, { ...downloads[0], domestic: false });
-    for (const expected of downloads) {
-      view.query(`#tab-${expected.system}`).dispatch('click');
-      view.architectures.find(button => button.dataset.architecture === expected.architecture).dispatch('click');
-      assertSelection(view, { ...expected, domestic: available.includes(`${expected.system}:${expected.architecture}`) });
-    }
-  }
-});
-
-check('System selection resets to sensible defaults; the Windows hero action resets both selections', () => {
-  const view = createPage();
-  for (const [system, architecture] of [['macos', 'arm64'], ['linux', 'x64'], ['windows', 'x64'], ['macos', 'arm64']]) {
-    view.architectures.find(button => button.dataset.architecture === 'arm64').dispatch('click');
-    view.query(`#tab-${system}`).dispatch('click');
-    assertSelection(view, expectedSelection(system, architecture));
-  }
-  assert.ok(view.windowsLinks.length > 0);
-  for (const link of view.windowsLinks) {
-    view.query('#tab-linux').dispatch('click');
-    view.architectures.find(button => button.dataset.architecture === 'arm64').dispatch('click');
-    link.dispatch('click');
-    assertSelection(view, downloads[0]);
-  }
-});
-
-check('Arrow/Home/End keys wrap and move focus; Tab and unrelated keys retain native behavior', () => {
-  const view = createPage();
-  let active = view.query('#tab-windows');
-  for (const [key, system, architecture] of [
-    ['ArrowLeft', 'linux', 'x64'], ['ArrowRight', 'windows', 'x64'],
-    ['ArrowRight', 'macos', 'arm64'], ['End', 'linux', 'x64'], ['Home', 'windows', 'x64'],
-  ]) {
-    assert.equal(active.dispatch('keydown', { key }).defaultPrevented, true);
-    active = view.query(`#tab-${system}`);
-    assert.equal(view.page.activeElement, active);
-    assertSelection(view, expectedSelection(system, architecture));
-  }
-  for (const key of ['Tab', 'Enter', 'ArrowDown', 'Escape']) {
-    assert.equal(active.dispatch('keydown', { key }).defaultPrevented, false);
-    assert.equal(view.page.activeElement, active);
-    assertSelection(view, downloads[0]);
-  }
-});
-
-console.log(`PASS: ${checks} offline download/interaction checks; no network, browser or desktop access.`);
+assert.equal(byId('download-gitee').attributes.href, '/download/windows-x64');
+assert.equal(byId('download-github').attributes.href, '/download/windows-x64?channel=github');
+for (const tag of [...systemTags, ...architectureTags]) assert.ok(Object.hasOwn(tag.attributes, 'disabled'));
+assert.doesNotMatch(html, /releases\/download\/v[0-9]/, 'No version-pinned HTML fallback');
+assert.match(html, /界面示意 · 非实时状态/);
+assert.match(html, /三个独立操作/);
+let complete;
+const view = createPage(() => new Promise(resolve => { complete = resolve; }));
+assert.match(view.query('#release-status').textContent, /正在查询/);
+verifySelection(view, 'windows-x64');
+view.tabs[1].dispatch('click');
+verifySelection(view, 'macos-arm64');
+complete({ ok: true, json: async () => data });
+await flush();
+verifySelection(view, 'macos-arm64');
+assert.match(view.query('#release-status').textContent, /v9.2.1/);
+for (const target of targets) {
+  const [system, arch] = target.split('-');
+  view.tabs.find(t => t.dataset.system === system).dispatch('click');
+  view.architectures.find(a => a.dataset.architecture === arch).dispatch('click');
+  verifySelection(view, target);
+  assert.match(view.query('#channel-note').textContent, system === 'windows' ? /已核对国内/ : /暂未确认国内/);
+}
+view.tabs[0].dispatch('keydown', { key: 'End' });
+verifySelection(view, 'linux-x64');
+assert.equal(view.page.activeElement, view.tabs[2]);
+view.tabs[2].dispatch('keydown', { key: 'ArrowRight' });
+verifySelection(view, 'windows-x64');
+view.tabs[0].dispatch('keydown', { key: 'ArrowLeft' });
+verifySelection(view, 'linux-x64');
+view.tabs[2].dispatch('keydown', { key: 'Home' });
+verifySelection(view, 'windows-x64');
+for (const hero of view.windowsLinks) { view.tabs[1].dispatch('click'); hero.dispatch('click'); verifySelection(view, 'windows-x64'); }
+for (const failure of ['network', 'status', 'malformed', 'incomplete']) {
+  let recovered = false;
+  const errorView = createPage(async () => {
+    if (recovered) return { ok: true, json: async () => data };
+    if (failure === 'network') throw new Error('offline');
+    if (failure === 'status') return { ok: false };
+    if (failure === 'malformed') return { ok: true, json: async () => { throw new Error('bad json'); } };
+    return { ok: true, json: async () => ({ version: 'v9.2.1', assets: {} }) };
+  });
+  await flush();
+  assert.match(errorView.query('#release-status').textContent, /无法确认/);
+  assert.doesNotMatch(errorView.query('#release-status').textContent, /当前最新正式版/);
+  assert.equal(errorView.query('#release-retry').hidden, false);
+  verifySelection(errorView, 'windows-x64');
+  recovered = true;
+  errorView.query('#release-retry').dispatch('click');
+  await flush();
+  assert.match(errorView.query('#release-status').textContent, /v9.2.1/);
+  assert.equal(errorView.query('#release-retry').hidden, true);
+}
+console.log('PASS: six platforms, keyboard, loading/errors/retry, no-JS fallback, independent click-time URLs.');

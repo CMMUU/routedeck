@@ -210,6 +210,7 @@ def prepare_assets(root, artifacts, output, tag, fetch_source=download_source,
     for path in packages:
         shutil.copyfile(path, output / path.name)
     stage_updaters(root, artifacts, output, version, notes)
+    stage_download_manifest(output, version)
     shutil.copyfile(license_path, output / f"Mihomo-LICENSE-v{core}.txt")
     source_path = output / f"mihomo-v{core}-source.tar.gz"
     fetch_source(source_url, source_path)
@@ -223,6 +224,26 @@ def prepare_assets(root, artifacts, output, tag, fetch_source=download_source,
     checksums = output / "SHA256SUMS.txt"
     checksums.write_text("".join(f"{sha256(path)}  {path.name}\n" for path in assets), encoding="utf-8", newline="\n")
     return [*assets, checksums], notes
+
+
+def stage_download_manifest(output, version):
+    """Website catalog: exact primary packages, after updater signature verification.
+
+    Historical releases remain byte-for-byte unchanged. SHA256SUMS.txt includes
+    this catalog, and the release stays a draft until all attachments verify.
+    """
+    if tuple(map(int, version.split("."))) < (0, 7, 7):
+        return
+    assets = {}
+    for build, names in package_names(version).items():
+        target = build.replace("macos-aarch64", "macos-arm64")
+        path = output / names[0]
+        if not path.is_file() or path.is_symlink() or path.stat().st_size <= 0:
+            raise ReleaseError("Website download catalog requires every primary package")
+        assets[target] = {"filename": path.name, "size": path.stat().st_size, "sha256": sha256(path)}
+    manifest = {"schemaVersion": 1, "version": f"v{version}", "assets": assets}
+    (output / "downloads.json").write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n",
+                                          encoding="utf-8", newline="\n")
 
 
 class GitHub:

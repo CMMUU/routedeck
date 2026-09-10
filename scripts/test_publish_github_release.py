@@ -10,7 +10,7 @@ from generate_compliance import (INPUT_PATHS, cargo_components, core_component,
                                  markdown as compliance_markdown, npm_components)
 from publish_github_release import (ReleaseError, collect_packages, package_names,
                                     prepare_assets, publish, release_title, sha256, validate_version,
-                                    validate_compliance)
+                                    validate_compliance, stage_download_manifest)
 
 
 COMMIT = "a" * 40
@@ -67,6 +67,33 @@ class FakeGitHub:
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_website_catalog_matches_all_six_staged_primary_packages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            expected = {}
+            for build, names in package_names("0.7.7").items():
+                path = output / names[0]
+                path.write_bytes(f"Package {build}".encode())
+                expected[build.replace("macos-aarch64", "macos-arm64")] = {
+                    "filename": path.name, "size": path.stat().st_size, "sha256": sha256(path),
+                }
+            stage_download_manifest(output, "0.7.7")
+            actual = json.loads((output / "downloads.json").read_text())
+            self.assertEqual(actual, {"schemaVersion": 1, "version": "v0.7.7", "assets": expected})
+            self.assertEqual(len(actual["assets"]), 6)
+
+    def test_website_catalog_rejects_missing_empty_packages_and_preserves_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            stage_download_manifest(output, "0.7.6")
+            self.assertFalse((output / "downloads.json").exists())
+            with self.assertRaises(ReleaseError):
+                stage_download_manifest(output, "0.7.7")
+            for names in package_names("0.7.7").values():
+                (output / names[0]).touch()
+            with self.assertRaises(ReleaseError):
+                stage_download_manifest(output, "0.7.7")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
