@@ -8,7 +8,7 @@ import { NAV_ITEMS, navigationMarkup, type ViewName } from "./ui";
 import { preferencesMarkup } from "./settings-view";
 import { mountLogs } from "./log-view";
 import { installContinuousScrolling } from "./scrolling";
-import { sessionResumeHelp, sessionResumePresentation } from "./session-resume";
+import { sessionResumePresentation, canStopSession, startupModeFromSettings, startupModeSettings, startupModeHelp, startupRegistrationPresentation, type StartupMode } from "./session-resume";
 import { canStartRuntime, startRuntimeInMode, type RuntimeStartMode } from "./runtime-start";
 import { api, errorMessage, revisionLabel } from "./api";
 import { describeAppUpdate } from "./app-update";
@@ -39,6 +39,7 @@ import type {
   ProfileRecord,
   RuntimeStatus,
   SessionResumeStatus,
+  StartupStatus,
   SystemProxyStatus,
   SubscriptionOverview,
   TunHelperStatus,
@@ -145,6 +146,10 @@ let appearanceFeedback = "";
 let sessionResumeStatus: SessionResumeStatus | null = null;
 let sessionResumeRevision = 0;
 let sessionResumeReadBusy = false;
+let sessionResumeReadAgain = false;
+let startupStatus: StartupStatus | null = null;
+// An asynchronous refresh must not overwrite an unsaved startup-mode choice.
+let startupModeDraft: StartupMode | null = null;
 const OPENAI_GROUP_NAME = "🤖 OpenAI 自动灾备";
 document.documentElement.dataset.view = store.view;
 
@@ -682,24 +687,44 @@ function renderSessionResume() {
   $("#session-resume-title")!.textContent = presentation.title;
   $("#session-resume-message")!.textContent = presentation.message;
   $("#session-resume-status")!.textContent = sessionResumeStatus?.message ?? "";
-  if (store.settings) $("#session-resume-help")!.textContent = sessionResumeHelp(store.settings.launchAtLogin, store.settings.restoreLastSession, store.settings.silentStartup);
+  if (store.settings) {
+    const mode = startupModeDraft ?? startupModeFromSettings(store.settings);
+    $("#session-resume-help")!.textContent = (startupModeDraft ? "待保存：" : "") + startupModeHelp(store.settings, mode);
+  }
+  const registration = startupRegistrationPresentation(startupStatus);
+  $("#startup-registration-status")!.textContent = registration.text;
+  $("#startup-registration-status")!.classList.toggle("startup-registration-issue", registration.issue);
 }
 
-async function refreshSessionResume() {
-  if (sessionResumeReadBusy) return;
+async function refreshSessionResume(force = false) {
+  if (sessionResumeReadBusy) {
+    if (force) sessionResumeReadAgain = true;
+    return;
+  }
   sessionResumeReadBusy = true;
   const revision = sessionResumeRevision;
   try {
     const status = await api.sessionResume();
+    const registration = store.view === "settings" || startupStatus === null || force
+      ? await api.startupStatus().catch(() => null)
+      : undefined;
     if (revision !== sessionResumeRevision) return;
+    if (registration !== undefined) startupStatus = registration;
     const wasBusy = sessionResumePresentation(sessionResumeStatus).busy;
     sessionResumeStatus = status;
     renderSessionResume();
+    renderHeader();
     if (wasBusy && !sessionResumePresentation(status).busy) void refreshBase();
   } catch {
     // Status reads never start a core or guess whether restoration succeeded.
     if (revision === sessionResumeRevision) $("#session-resume-status")!.textContent = "恢复状态暂时无法读取，可点击刷新重试。";
-  } finally { sessionResumeReadBusy = false; }
+  } finally {
+    sessionResumeReadBusy = false;
+    if (sessionResumeReadAgain) {
+      sessionResumeReadAgain = false;
+      void refreshSessionResume();
+    }
+  }
 }
 
 function renderHeader() {
@@ -740,7 +765,7 @@ function renderHeader() {
   tunButton.title = store.tunHelper?.message ?? "TUN 使用最小权限 Helper 接管系统流量";
   tunButton.disabled = controlsBusy || !store.settings || !store.activeProfile;
   ($("#global-start") as HTMLButtonElement).disabled = !canStartRuntime(store.runtime) || !store.settings || !store.activeProfile || controlsBusy;
-  ($("#global-stop") as HTMLButtonElement).disabled = !running || controlsBusy;
+  ($("#global-stop") as HTMLButtonElement).disabled = !canStopSession(store.runtime?.phase, sessionResumeStatus, startupStatus) || controlsBusy;
   $("#about-app")!.textContent = store.appInfo?.version ?? "—";
   $("#about-core")!.textContent = store.binary?.version ?? "未找到";
   $("#about-platform")!.textContent = store.appInfo
@@ -958,9 +983,12 @@ function renderSettings() {
   document.querySelectorAll<HTMLInputElement>('[name="settings-network-mode"]').forEach((radio) => { radio.checked = radio.value === store.settings!.networkMode; });
   ($("#settings-mixed-port") as HTMLInputElement).value = String(store.settings.mixedPort);
   ($("#settings-controller-port") as HTMLInputElement).value = String(store.settings.controllerPort);
-  ($("#settings-launch") as HTMLInputElement).checked = store.settings.launchAtLogin;
-  ($("#settings-silent-startup") as HTMLInputElement).checked = store.settings.silentStartup;
-  ($("#settings-restore-session") as HTMLInputElement).checked = store.settings.restoreLastSession;
+  const startupSelect = $("#settings-startup-mode") as HTMLSelectElement;
+  const savedStartupMode = startupModeFromSettings(store.settings);
+  const legacyOption = startupSelect.querySelector<HTMLOptionElement>('[value="custom"]')!;
+  legacyOption.hidden = savedStartupMode !== "custom";
+  legacyOption.disabled = savedStartupMode !== "custom";
+  startupSelect.value = startupModeDraft ?? savedStartupMode;
   ($("#settings-global-traffic") as HTMLInputElement).checked =
     store.settings.showGlobalTraffic;
   ($("#settings-auto-check-updates") as HTMLInputElement).checked =
@@ -1294,6 +1322,7 @@ async function startRuntime(mode: RuntimeStartMode) {
   } else if (result.kind === "started") {
     toast(store.settings?.networkMode === "system_proxy" ? "Mihomo 已启动，系统代理已开启" : store.settings?.networkMode === "tun" ? "Mihomo 已启动，TUN 模式已开启" : "Mihomo 已启动，仅使用本地代理端口", "success");
   }
+  void refreshSessionResume(true);
 }
 
 async function stopRuntime() {
@@ -1310,6 +1339,7 @@ async function stopRuntime() {
     runtimeMutationRevision++;
     renderAppearance(themeController.snapshot);
     await refreshRuntimeOnly();
+    void refreshSessionResume(true);
   }
 }
 
@@ -2126,6 +2156,7 @@ function navigate(view: ViewName) {
     if (store.runtime?.phase === "running") void refreshProxies();
   }
   if (view === "subscriptions") renderSubscriptions();
+  if (view === "settings") void refreshSessionResume(true);
   if (view === "programs") void programManager.refresh();
   if (view === "routing") void localRouting.refresh();
   if (view === "rules") {
@@ -2473,19 +2504,23 @@ document.querySelectorAll<HTMLInputElement>('[name="settings-network-mode"]').fo
     if (radio.checked) ($("#settings-mode") as HTMLSelectElement).value = radio.value;
   });
 });
+$("#settings-startup-mode")!.addEventListener("change", () => {
+  if (settingsSaving || !store.settings) return;
+  const selected = ($("#settings-startup-mode") as HTMLSelectElement).value as StartupMode;
+  startupModeDraft = selected === startupModeFromSettings(store.settings) ? null : selected;
+  renderSessionResume();
+});
+$("#settings-startup-check")!.addEventListener("click", () => { void refreshSessionResume(true); });
 $("#settings-form")!.addEventListener("submit", async (event) => {
   event.preventDefault();
   if (!store.settings || settingsSaving || runtimeActionInFlight || networkModeSwitching || themeController.snapshot.saving) return;
   const mode = ($("#settings-mode") as HTMLSelectElement).value as NetworkMode;
   const settings: AppSettings = {
-    ...store.settings,
+    ...startupModeSettings(store.settings, startupModeDraft ?? startupModeFromSettings(store.settings)),
     networkMode: mode,
     mixedPort: Number(($("#settings-mixed-port") as HTMLInputElement).value),
     controllerPort: Number(($("#settings-controller-port") as HTMLInputElement).value),
     theme: themeController.snapshot.preference,
-    launchAtLogin: ($("#settings-launch") as HTMLInputElement).checked,
-    silentStartup: ($("#settings-silent-startup") as HTMLInputElement).checked,
-    restoreLastSession: ($("#settings-restore-session") as HTMLInputElement).checked,
     showGlobalTraffic: ($("#settings-global-traffic") as HTMLInputElement).checked,
     diagnosticsRetentionDays: Number(
       ($("#settings-retention") as HTMLInputElement).value,
@@ -2494,6 +2529,9 @@ $("#settings-form")!.addEventListener("submit", async (event) => {
   };
   settingsSaving = true;
   runtimeMutationRevision++;
+  sessionResumeRevision++;
+  startupStatus = null;
+  ($("#settings-startup-mode") as HTMLSelectElement).disabled = true;
   themeController.refresh();
   try {
     if (mode === "tun" && mode !== store.settings.networkMode) {
@@ -2507,6 +2545,7 @@ $("#settings-form")!.addEventListener("submit", async (event) => {
     });
     if (updated) {
       store.settings = updated;
+      startupModeDraft = null;
       renderSettings();
       renderOverview();
       renderGlobalTraffic();
@@ -2514,7 +2553,9 @@ $("#settings-form")!.addEventListener("submit", async (event) => {
   } finally {
     settingsSaving = false;
     runtimeMutationRevision++;
+    ($("#settings-startup-mode") as HTMLSelectElement).disabled = false;
     themeController.refresh();
+    void refreshSessionResume(true);
   }
 });
 
@@ -2540,6 +2581,7 @@ void listen<SessionResumeStatus>("session-resume-status", (event) => {
   sessionResumeRevision++;
   sessionResumeStatus = event.payload;
   renderSessionResume();
+  renderHeader();
   if (!sessionResumePresentation(event.payload).busy) void refreshBase();
 }).then(() => refreshSessionResume()).catch(() => { void refreshSessionResume(); });
 

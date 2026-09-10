@@ -8,7 +8,43 @@ const read = name => readFileSync(new URL(`../${name}`, import.meta.url), "utf8"
 const source = ts.transpileModule(read("src/session-resume.ts"), {
   compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext },
 }).outputText;
-const { sessionResumeHelp, sessionResumePresentation } = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
+const { sessionResumeHelp, sessionResumePresentation, canStopSession, startupModeFromSettings, startupModeSettings, startupModeHelp, startupRegistrationPresentation } = await import(`data:text/javascript;base64,${Buffer.from(source).toString("base64")}`);
+
+test("startup modes preserve legacy intent and unrelated settings", () => {
+  const legacy = { launchAtLogin: false, silentStartup: true, restoreLastSession: false, networkMode: "tun", controllerPort: 9090 };
+  assert.equal(startupModeFromSettings(legacy), "manual");
+  assert.deepEqual(startupModeSettings(legacy, "manual"), legacy);
+  assert.deepEqual(startupModeSettings(legacy, "background"), { ...legacy, launchAtLogin: true, silentStartup: true, restoreLastSession: true });
+  const window = startupModeSettings(legacy, "window");
+  assert.equal(window.silentStartup, false);
+  assert.equal(startupModeFromSettings(window), "window");
+  assert.equal(startupModeFromSettings({ ...legacy, launchAtLogin: true }), "custom");
+  assert.deepEqual(startupModeSettings(legacy, "custom"), legacy);
+  assert.equal(legacy.restoreLastSession, false, "reading/changing a draft does not mutate saved preferences");
+  assert.throws(() => startupModeSettings(legacy, "invalid"), /启动模式无效/);
+  assert.match(startupModeHelp(legacy, "background"), /托盘后台恢复/);
+  assert.match(startupModeHelp(legacy, "background"), /上次已停止则保持停止/);
+});
+
+test("registration feedback distinguishes saved intent, OS denial and unknown state", () => {
+  const status = { launchRequested: true, registered: true, systemAllows: false, desiredRunning: false, message: "系统已禁用。" };
+  assert.equal(startupRegistrationPresentation(status).issue, true);
+  assert.match(startupRegistrationPresentation(status).text, /已关闭，下次保持停止/);
+  assert.equal(startupRegistrationPresentation({ ...status, systemAllows: true }).issue, false);
+  assert.equal(startupRegistrationPresentation({ ...status, registered: false }).issue, true);
+  assert.equal(startupRegistrationPresentation({ ...status, registered: null }).issue, true);
+  assert.match(startupRegistrationPresentation(null).text, /尚未读取/);
+});
+
+test("waiting restoration remains cancellable even while the core is stopped", () => {
+  assert.equal(sessionResumePresentation({ phase: "waiting_network", message: "等待网络" }).busy, true);
+  assert.match(sessionResumePresentation({ phase: "waiting_network", message: "等待网络" }).title, /等待网络/);
+  assert.match(read("src/main.ts"), /!canStopSession\(store.runtime\?\.phase, sessionResumeStatus, startupStatus\)/);
+  assert.equal(canStopSession("stopped", { phase: "paused", message: "配置待处理" }, null), true);
+  const startup = { launchRequested: false, registered: false, systemAllows: null, desiredRunning: true, message: "" };
+  assert.equal(canStopSession("crashed", { phase: "idle", message: "" }, startup), true);
+  assert.equal(canStopSession("stopped", { phase: "idle", message: "" }, { ...startup, desiredRunning: false }), false);
+});
 
 test("missing restore status never claims success or starts a core", () => {
   const view = sessionResumePresentation(null);
@@ -18,7 +54,7 @@ test("missing restore status never claims success or starts a core", () => {
 });
 
 test("pending and restoring show progress, not connection success", () => {
-  for (const phase of ["pending", "restoring"]) {
+  for (const phase of ["pending", "restoring", "waiting_network"]) {
     const view = sessionResumePresentation({ phase, message: "正在检查本地核心。" });
     assert.equal(view.busy, true);
     assert.equal(view.visible, true);
@@ -52,7 +88,11 @@ test("restore help distinguishes login launch, manual opening and opt out", () =
 
 test("settings save, polling and event paths are wired to the same persisted option", () => {
   const main = read("src/main.ts");
-  assert.match(main, /restoreLastSession:.*#settings-restore-session/);
+  assert.match(main, /startupModeSettings\(store\.settings, startupModeDraft/);
+  assert.match(main, /startupModeDraft = null/);
+  assert.match(main, /startupModeDraft \?\? savedStartupMode/);
+  assert.match(read("src/settings-view.ts"), /id="settings-startup-mode"/);
+  assert.match(read("src/api.ts"), /invoke<StartupStatus>\("get_startup_status"\)/);
   assert.match(main, /listen<SessionResumeStatus>\("session-resume-status"/);
   assert.match(main, /revision !== sessionResumeRevision/);
   assert.match(read("src/api.ts"), /invoke<SessionResumeStatus>\("get_session_resume_status"\)/);

@@ -298,7 +298,7 @@ class SyncTests(unittest.TestCase):
     def test_corrupt_or_truncated_download_never_becomes_final_file(self):
         for payload in (b"bad", b"good-extra", b"goo"):
             api = sync.Api("github", "offline-secret")
-            api.opener = Opener([Response(payload)])
+            api.opener = Opener([Response(payload) for _ in range(sync.READ_ATTEMPTS)])
             directory = self.fixture()
             with self.assertRaises(sync.SyncError):
                 api.download("/asset", directory / "file.zip", 4, hashlib.sha256(b"good").hexdigest())

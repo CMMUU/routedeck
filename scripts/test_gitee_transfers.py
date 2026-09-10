@@ -1,6 +1,10 @@
 """Bounded parallel transfers with independent clients and a manifest barrier."""
 import threading
 import unittest
+import hashlib
+import io
+import tempfile
+from pathlib import Path
 from unittest.mock import patch
 
 import sync_gitee as sync
@@ -90,6 +94,47 @@ class TransferTests(unittest.TestCase):
                 job.transfer_attachments(12, [{"name": name} for name in names])
         self.assertTrue(set(calls).issubset({"a.zip", "b.zip", "c.zip"}))
         self.assertEqual(calls.count("a.zip"), 1)
+
+    def test_truncated_read_retries_without_publishing_partial_output(self):
+        payload = b"verified attachment content"
+        api = sync.Api("gitee", "fixture-secret")
+        with tempfile.TemporaryDirectory() as folder:
+            destination = Path(folder) / "Serylane_sample.bin"
+            with patch.object(api.opener, "open", side_effect=[io.BytesIO(payload[:4]), io.BytesIO(payload)]) as opened, \
+                    patch.object(sync.time, "sleep"):
+                result = api.download("/repos/cmmuu/serylane/releases/1/attach_files/2/download",
+                                      destination, len(payload), hashlib.sha256(payload).hexdigest())
+            self.assertEqual(opened.call_count, 2)
+            self.assertEqual(result, hashlib.sha256(payload).hexdigest())
+            self.assertEqual(destination.read_bytes(), payload)
+            self.assertEqual(list(Path(folder).glob("*.part-*")), [])
+
+    def test_repeated_hash_mismatch_remains_fatal_and_never_commits_bad_bytes(self):
+        api = sync.Api("gitee", "fixture-secret")
+        with tempfile.TemporaryDirectory() as folder:
+            destination = Path(folder) / "Serylane_sample.bin"
+            with patch.object(api.opener, "open", side_effect=lambda *a, **kw: io.BytesIO(b"bad!")) as opened, \
+                    patch.object(sync.time, "sleep"):
+                with self.assertRaises(sync.SyncError) as result:
+                    api.download("/repos/cmmuu/serylane/releases/1/attach_files/2/download",
+                                 destination, 4, hashlib.sha256(b"good").hexdigest())
+            self.assertEqual(opened.call_count, sync.READ_ATTEMPTS)
+            self.assertIn(destination.name, str(result.exception))
+            self.assertNotIn(api.token, str(result.exception))
+            self.assertFalse(destination.exists())
+            self.assertEqual(list(Path(folder).glob("*.part-*")), [])
+
+    def test_website_catalog_and_all_update_manifests_wait_for_verified_payloads(self):
+        job, calls = self.job(1), []
+        names = ["downloads.json", "latest-serylane.json", "latest-serylane-gitee.json",
+                 "latest.json", "latest-gitee.json", "app.zip", "app.zip.sig", "SHA256SUMS.txt"]
+        def ensure(release_id, item):
+            if item["name"] in sync.RELEASE_MANIFESTS:
+                self.assertTrue({"app.zip", "app.zip.sig", "SHA256SUMS.txt"}.issubset(calls))
+            calls.append(item["name"])
+        with patch.object(job, "ensure_attachment", side_effect=ensure):
+            job.transfer_attachments(12, [{"name": name} for name in names])
+        self.assertCountEqual(calls[-5:], sync.RELEASE_MANIFESTS)
 
     def test_serial_default_preserves_manifest_last_order(self):
         job, calls = self.job(1), []

@@ -310,7 +310,7 @@ test("switches retain a native checked input and keyboard-focusable control", ()
 test("preference groups preserve all backend binding IDs without duplication", () => {
   const ids = [...preferencesMarkup.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
   assert.equal(new Set(ids).size, ids.length);
-  for (const id of ["settings-mode", "settings-mixed-port", "settings-controller-port", "settings-launch", "settings-global-traffic", "settings-retention", "settings-form", "update-preferences-form", "app-update-current", "app-update-check", "app-update-save", "app-update-download", "app-update-cancel", "app-update-install", "app-update-message", "network-mode-help"]) assert.ok(ids.includes(id), id);
+  for (const id of ["settings-mode", "settings-mixed-port", "settings-controller-port", "settings-startup-mode", "settings-startup-check", "startup-registration-status", "settings-global-traffic", "settings-retention", "settings-form", "update-preferences-form", "app-update-current", "app-update-check", "app-update-save", "app-update-download", "app-update-cancel", "app-update-install", "app-update-message", "network-mode-help"]) assert.ok(ids.includes(id), id);
   assert.match(preferencesMarkup, /安装和重启会短暂中断代理连接/);
 });
 test("network modes remain native radio drafts, not immediate proxy mutations", () => {

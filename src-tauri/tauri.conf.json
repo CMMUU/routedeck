@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Serylane",
-  "version": "0.7.7",
+  "version": "0.7.8",
   "identifier": "com.cmmuu.mihomodesktop",
   "build": {
     "beforeDevCommand": "npm run core:prepare && npm run dev",
@@ -37,10 +37,16 @@
     "windows": {
       "wix": {
         "upgradeCode": "3dc8b957-21f1-51b9-ab4c-df67ce49b53d",
-        "fragmentPaths": ["installer/login-cleanup.wxs"],
-        "componentGroupRefs": ["SerylaneLoginCleanup"]
+        "fragmentPaths": [
+          "installer/login-cleanup.wxs"
+        ],
+        "componentGroupRefs": [
+          "SerylaneLoginCleanup"
+        ]
       },
-      "nsis": { "template": "installer/installer.nsi" }
+      "nsis": {
+        "template": "installer/installer.nsi"
+      }
     },
     "macOS": {
       "signingIdentity": "-",

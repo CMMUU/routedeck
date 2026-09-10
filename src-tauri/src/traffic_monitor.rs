@@ -333,7 +333,7 @@ fn render_monochrome_macos_tray_icon(
         .clamp(184.0, 244.0) as u32;
     let mut rgba = vec![0_u8; (width * HEIGHT * 4) as usize];
     let monochrome = [255, 255, 255, 255];
-    draw_m_mark(&mut rgba, width, HEIGHT, monochrome);
+    draw_brand_mark(&mut rgba, width, HEIGHT, 0, 4, 56);
     draw_smooth_arrow(&mut rgba, width, HEIGHT, 74.0, 8.0, true, monochrome);
     draw_smooth_arrow(&mut rgba, width, HEIGHT, 74.0, 36.0, false, monochrome);
     draw_smooth_text(
@@ -417,43 +417,53 @@ fn draw_smooth_text(
 }
 
 #[cfg(target_os = "macos")]
-fn draw_m_mark(rgba: &mut [u8], width: u32, height: u32, color: [u8; 4]) {
-    let points = [
-        (5.0, 8.0),
-        (16.0, 8.0),
-        (29.0, 24.0),
-        (42.0, 8.0),
-        (53.0, 8.0),
-        (53.0, 56.0),
-        (41.0, 56.0),
-        (41.0, 31.0),
-        (29.0, 44.0),
-        (17.0, 31.0),
-        (17.0, 56.0),
-        (5.0, 56.0),
-    ];
-    for y in 5..59_i32 {
-        for x in 2..57_i32 {
-            if point_in_polygon(x as f32 + 0.5, y as f32 + 0.5, &points) {
-                blend_pixel(rgba, width, height, x, y, color, 255);
-            }
-        }
-    }
+static TRAY_BRAND_ICON: OnceLock<tauri::image::Image<'static>> = OnceLock::new();
+
+#[cfg(target_os = "macos")]
+fn tray_brand_icon() -> &'static tauri::image::Image<'static> {
+    // Compile the same PNG used by the app/sidebar; no runtime file lookup or
+    // independent handwritten brand glyph can drift from the application icon.
+    TRAY_BRAND_ICON.get_or_init(|| tauri::include_image!("icons/128x128.png"))
 }
 
 #[cfg(target_os = "macos")]
-fn point_in_polygon(x: f32, y: f32, points: &[(f32, f32)]) -> bool {
-    let mut inside = false;
-    let mut previous = points.len() - 1;
-    for current in 0..points.len() {
-        let (xi, yi) = points[current];
-        let (xj, yj) = points[previous];
-        if ((yi > y) != (yj > y)) && x < (xj - xi) * (y - yi) / (yj - yi) + xi {
-            inside = !inside;
-        }
-        previous = current;
+fn draw_brand_mark(rgba: &mut [u8], width: u32, height: u32, x: u32, y: u32, size: u32) {
+    if size == 0 {
+        return;
     }
-    inside
+    let icon = tray_brand_icon();
+    let source = icon.rgba();
+    for dy in 0..size.min(height.saturating_sub(y)) {
+        let sy0 = dy * icon.height() / size;
+        let sy1 = ((dy + 1) * icon.height() / size)
+            .max(sy0 + 1)
+            .min(icon.height());
+        for dx in 0..size.min(width.saturating_sub(x)) {
+            let sx0 = dx * icon.width() / size;
+            let sx1 = ((dx + 1) * icon.width() / size)
+                .max(sx0 + 1)
+                .min(icon.width());
+            let mut alpha = 0_u32;
+            for sy in sy0..sy1 {
+                for sx in sx0..sx1 {
+                    alpha += u32::from(source[((sy * icon.width() + sx) * 4 + 3) as usize]);
+                }
+            }
+            let coverage = (alpha / ((sy1 - sy0) * (sx1 - sx0))) as u8;
+            // macOS applies the correct menu-bar color to this template mask.
+            if coverage > 0 {
+                blend_pixel(
+                    rgba,
+                    width,
+                    height,
+                    (x + dx) as i32,
+                    (y + dy) as i32,
+                    [255, 255, 255, 255],
+                    coverage,
+                );
+            }
+        }
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -599,14 +609,12 @@ fn blend_pixel(
 #[cfg(target_os = "macos")]
 fn render_pixel_macos_tray_icon(upload: &str, download: &str) -> tauri::image::Image<'static> {
     const HEIGHT: u32 = 32;
-    const M_X: u32 = 4;
-    const M_Y: u32 = 5;
     const ARROW_X: u32 = 24;
     const TEXT_X: u32 = 36;
     let text_width = pixel_text_width(upload, 2).max(pixel_text_width(download, 2));
     let width = (TEXT_X + text_width + 3).clamp(90, 119);
     let mut rgba = vec![0_u8; (width * HEIGHT * 4) as usize];
-    draw_text(&mut rgba, width, HEIGHT, M_X, M_Y, "M", 3, 255);
+    draw_brand_mark(&mut rgba, width, HEIGHT, 0, 4, 24);
     draw_arrow(&mut rgba, width, HEIGHT, ARROW_X, 1, true);
     draw_arrow(&mut rgba, width, HEIGHT, ARROW_X, 17, false);
     draw_text(&mut rgba, width, HEIGHT, TEXT_X, 0, upload, 2, 235);
@@ -761,6 +769,63 @@ fn glyph(character: char) -> Option<[u8; 7]> {
 #[cfg(test)]
 mod tests {
     use super::{format_tray_rate, rate_per_second, should_include_interface};
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn tray_mark_is_the_application_icon_alpha_not_an_independent_glyph() {
+        let icon = super::tray_brand_icon();
+        assert_eq!((icon.width(), icon.height()), (128, 128));
+        let mut rgba = vec![0_u8; 128 * 128 * 4];
+        super::draw_brand_mark(&mut rgba, 128, 128, 0, 0, 128);
+        let mut visible = 0;
+        for (rendered, source) in rgba.chunks_exact(4).zip(icon.rgba().chunks_exact(4)) {
+            assert_eq!(rendered[3], source[3]);
+            if source[3] > 0 {
+                visible += 1;
+                assert_eq!(&rendered[..3], &[255, 255, 255]);
+            }
+        }
+        assert!(visible > 1000 && visible < 128 * 128);
+        let before = rgba.clone();
+        super::draw_brand_mark(&mut rgba, 128, 128, 0, 0, 0);
+        assert_eq!(rgba, before);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn normal_and_fallback_trays_both_use_the_shared_s_mark() {
+        let fallback = super::render_pixel_macos_tray_icon("1.2M/s", "8.3K/s");
+        let font = super::macos_status_font().expect("macOS system status font");
+        let normal = super::render_monochrome_macos_tray_icon(font, "1.2M/s", "8.3K/s");
+        for (image, size, top) in [(&normal, 56, 4), (&fallback, 24, 4)] {
+            let mut expected = vec![0_u8; (image.width() * image.height() * 4) as usize];
+            super::draw_brand_mark(&mut expected, image.width(), image.height(), 0, top, size);
+            for y in top..top + size {
+                for x in 0..size {
+                    let alpha = ((y * image.width() + x) * 4 + 3) as usize;
+                    assert_eq!(image.rgba()[alpha], expected[alpha]);
+                }
+            }
+        }
+        // Optional local visual evidence, never used by production or required
+        // in CI. The bytes contain only the public icon and synthetic rates.
+        if let Some(folder) = std::env::var_os("SERYLANE_TRAY_SNAPSHOT_DIR") {
+            let folder = std::path::PathBuf::from(folder);
+            std::fs::create_dir_all(&folder).unwrap();
+            for (name, image) in [("normal", normal), ("fallback", fallback)] {
+                std::fs::write(folder.join(format!("{name}.rgba")), image.rgba()).unwrap();
+                std::fs::write(
+                    folder.join(format!("{name}.json")),
+                    format!(
+                        "{{\"width\":{},\"height\":{}}}",
+                        image.width(),
+                        image.height()
+                    ),
+                )
+                .unwrap();
+            }
+        }
+    }
 
     #[test]
     fn filters_virtual_interfaces_without_excluding_physical_names() {

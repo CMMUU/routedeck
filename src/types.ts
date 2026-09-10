@@ -112,8 +112,16 @@ export type RuntimeStatus = {
   lastError: string | null;
 };
 
+export type StartupStatus = {
+  launchRequested: boolean;
+  registered: boolean | null;
+  systemAllows: boolean | null;
+  desiredRunning: boolean;
+  message: string;
+};
+
 export type SessionResumeStatus = {
-  phase: "idle" | "pending" | "restoring" | "restored" | "paused";
+  phase: "idle" | "pending" | "restoring" | "waiting_network" | "restored" | "paused";
   message: string;
 };
 

@@ -36,9 +36,10 @@ test("log content is text-only and refresh preserves source, filters and reading
   assert.match(read("src/main.ts"), /if \(store\.view === "logs"\) void refreshLogs\(\);\s*if \(store\.runtime\?\.phase === "running"\)/);
 });
 
-test("silent startup and last mode remain separately persisted settings", () => {
-  assert.match(read("src/settings-view.ts"), /settings-silent-startup/);
-  assert.match(read("src/main.ts"), /silentStartup:.*#settings-silent-startup/);
+test("startup mode composes existing preferences without coupling Codex routing", () => {
+  assert.match(read("src/settings-view.ts"), /settings-startup-mode/);
+  assert.match(read("src/session-resume.ts"), /silentStartup: mode === "background", restoreLastSession: true/);
+  assert.match(read("src/types.ts"), /silentStartup: boolean/);
   assert.match(read("src/main.ts"), /data-openai-action="stability"/);
   assert.match(read("src/main.ts"), /无需开启本地路由或接入 Codex/);
 });

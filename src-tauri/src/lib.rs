@@ -47,7 +47,6 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, State, WindowEvent,
 };
-use tauri_plugin_autostart::ManagerExt;
 use traffic_monitor::{GlobalTrafficMonitor, GlobalTrafficSnapshot, TRAY_ID};
 use tun_service::TunHelperStatus;
 use user_rules::{UserRule, UserRulesState, UserRulesValidation};
@@ -208,21 +207,7 @@ fn update_settings(
     }
     app_log::validate_retention_days(settings.app_log_retention_days).map_err(dto)?;
     let settings = settings.merge_secret(&current);
-    // Saving restoration or appearance preferences is not consent to rewrite
-    // the user's OS login registration. Only an actual checkbox change is.
-    if settings.launch_at_login != current.launch_at_login {
-        let autostart = app.autolaunch();
-        if settings.launch_at_login {
-            autostart
-                .enable()
-                .map_err(|error| dto(AppError::Platform(error.to_string())))?;
-        } else {
-            autostart
-                .disable()
-                .map_err(|error| dto(AppError::Platform(error.to_string())))?;
-        }
-    }
-    storage.save_settings(&settings).map_err(dto)?;
+    startup::save_startup_settings(&app, &storage, &current, &settings).map_err(dto)?;
     app_log::set_retention_days(settings.app_log_retention_days);
     if startup::migrate_login_entry(&app, &settings).is_err() {
         app_log::record(
@@ -1102,6 +1087,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_info,
             session_resume::get_session_resume_status,
+            startup::get_startup_status,
             local_routing::local_route_status,
             local_routing::save_local_route,
             local_routing::set_local_route_enabled,

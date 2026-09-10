@@ -67,9 +67,30 @@ let appearanceSettings = { launchAtLogin: false, silentStartup: false, restoreLa
 let fixtureResumeStatus = { phase: "idle", message: "合成状态：上次核心已停止，保持停止。未读取真实应用数据。" };
 window.addEventListener("routedeck-fixture-resume", event => {
   const detail = (event as CustomEvent).detail;
-  if (["idle", "pending", "restoring", "restored", "paused"].includes(detail.phase)) fixtureResumeStatus = { phase: detail.phase, message: String(detail.message) };
+  if (["idle", "pending", "restoring", "waiting_network", "restored", "paused"].includes(detail.phase)) fixtureResumeStatus = { phase: detail.phase, message: String(detail.message) };
 });
 let settingsSaveCount = 0;
+let fixtureStartupRegistered: boolean | null = false;
+let fixtureStartupAllowed: boolean | null = null;
+let fixtureDesiredRunning = false;
+let fixtureSettingsFailSave = false;
+function reportStartup() {
+  document.documentElement.dataset.fixtureStartupState = JSON.stringify({
+    ...appearanceSettings, registered: fixtureStartupRegistered, systemAllows: fixtureStartupAllowed, desiredRunning: fixtureDesiredRunning,
+  });
+}
+window.addEventListener("routedeck-fixture-startup", event => {
+  const detail = (event as CustomEvent).detail;
+  for (const key of ["launchAtLogin", "silentStartup", "restoreLastSession"] as const) {
+    if (typeof detail[key] === "boolean") appearanceSettings[key] = detail[key];
+  }
+  if (typeof detail.registered === "boolean" || detail.registered === null) fixtureStartupRegistered = detail.registered;
+  if (typeof detail.systemAllows === "boolean" || detail.systemAllows === null) fixtureStartupAllowed = detail.systemAllows;
+  if (typeof detail.desiredRunning === "boolean") fixtureDesiredRunning = detail.desiredRunning;
+  if (typeof detail.failSave === "boolean") fixtureSettingsFailSave = detail.failSave;
+  reportStartup();
+});
+reportStartup();
 let applicationLogReads = 0;
 let applicationLogEntries = [
   { timestamp: Date.now(), level: "warn", source: "网络预检", message: "演示事件：连接超时；未接管系统代理。此行不是实际网络故障。", count: 2 },
@@ -658,6 +679,16 @@ const readonlyReplies: Record<string, () => unknown> = {
   app_update_status: () => structuredClone(fixtureUpdate),
   get_settings: settings,
   get_session_resume_status: () => fixtureResumeStatus,
+  get_startup_status: () => ({
+    launchRequested: appearanceSettings.launchAtLogin, registered: fixtureStartupRegistered,
+    systemAllows: fixtureStartupAllowed, desiredRunning: fixtureDesiredRunning,
+    message: fixtureStartupRegistered === null ? "合成状态：登录项读取失败。"
+      : !fixtureStartupRegistered ? (appearanceSettings.launchAtLogin ? "合成状态：设置已开启，但登录项未登记。" : "合成状态：未登记登录项，不随系统启动。")
+      : !appearanceSettings.launchAtLogin ? "合成状态：登录项仍存在，与设置不一致。"
+      : fixtureStartupAllowed === false ? "合成状态：系统已禁用此登录项。"
+      : fixtureStartupAllowed === null ? "合成状态：已登记，系统允许状态尚未核实。"
+      : "合成状态：已登记登录项，未操作真实系统。",
+  }),
   get_user_rules: userRulesState,
   list_proxy_programs: programState,
   check_system_proxy_compatibility: () => ({ supported: true, systemConfigured: true, compatible: true, expectedProxy: programs.proxyEndpoint, resolvedHttp: programs.proxyEndpoint, resolvedHttps: programs.proxyEndpoint, detail: "合成检查：HTTP/HTTPS 解析已指向本地代理；未读取真实注册表，也未验证真实长连接。" }),
@@ -794,11 +825,15 @@ mockIPC(async (command, payload) => {
         throw routeError("RUNTIME_ERROR", "模拟核心启动失败；没有启动真实进程。");
       }
       fixtureRuntimePhase = "running";
+      fixtureDesiredRunning = true;
       fixtureSystemProxyActive = fixtureRuntimeMode === "system_proxy" && fixtureRuntimeProxyConfirmed;
     } else {
       fixtureRuntimePhase = "stopped";
+      fixtureDesiredRunning = false;
+      fixtureResumeStatus = { phase: "idle", message: "合成状态：用户停止，下次保持停止。" };
       fixtureSystemProxyActive = false;
     }
+    reportStartup();
     reportRuntimeScenario();
     const result = readonlyReplies.runtime_status();
     if (command === "start_active_profile" && fixtureRuntimeCrashAfterStart) {
@@ -931,7 +966,16 @@ mockIPC(async (command, payload) => {
       throw new Error("FIXTURE_ONLY: 网络模式与端口不可在预览中修改");
     }
     if (!Number.isInteger(value.appLogRetentionDays) || value.appLogRetentionDays < 1 || value.appLogRetentionDays > 90) throw new Error("INVALID_INPUT: 应用日志保留天数必须在 1 到 90 之间");
+    if (fixtureSettingsFailSave) {
+      fixtureSettingsFailSave = false;
+      throw new Error("IO_ERROR: 合成保存失败，原设置及登录项保持不变");
+    }
+    if (value.launchAtLogin !== appearanceSettings.launchAtLogin) {
+      fixtureStartupRegistered = value.launchAtLogin;
+      if (value.launchAtLogin) fixtureStartupAllowed = true;
+    }
     appearanceSettings = { launchAtLogin: value.launchAtLogin, silentStartup: value.silentStartup, restoreLastSession: value.restoreLastSession, showGlobalTraffic: value.showGlobalTraffic, diagnosticsRetentionDays: value.diagnosticsRetentionDays, appLogRetentionDays: value.appLogRetentionDays };
+    reportStartup();
     document.documentElement.dataset.fixtureSettingsSaves = String(++settingsSaveCount);
     report("运行偏好已保存到合成状态；未触及系统设置");
     return settings();
@@ -1188,7 +1232,7 @@ report("隔离桥接已安装，正在加载真实 src/main.ts");
 void import("../../src/main").then(() => {
   // Navigation only, never a command or actual application launch.
   const view = previewQuery.get("view");
-  if (view === "routing" || view === "subscriptions") document.querySelector<HTMLButtonElement>(`[data-view="${view}"]`)?.click();
+  if (view === "routing" || view === "subscriptions" || view === "settings") document.querySelector<HTMLButtonElement>(`[data-view="${view}"]`)?.click();
   report("预览已就绪；可测试主题、规则、路由合成状态、独立确认、失败与版本冲突");
 }).catch((error: unknown) => {
   runtimeErrorCount += 1;

@@ -287,7 +287,11 @@ class Api:
                     stream.write(block)
             actual = hasher.hexdigest()
             if size != expected_size or (expected_sha is not None and actual != expected_sha):
-                raise SyncError("Attachment size or SHA-256 validation failed")
+                # An idempotent CDN read can finish early or return stale bytes.
+                # Retry the read, never an upload, and never commit a bad file.
+                raise RetryableReadError(
+                    f"{self.service} attachment size or SHA-256 validation failed for {destination.name}: "
+                    f"received {size} bytes, expected {expected_size}; verified output was not written")
             if cached_sha is not None:
                 if actual != cached_sha:
                     raise SyncError("Cached unhashed attachment differs from the current source; neither file was overwritten")

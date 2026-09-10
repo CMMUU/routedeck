@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.8 - 2026-09-11
+
+- Replace the three startup toggles with explicit startup modes while preserving existing preferences and the last successful running/stopped intent.
+- Read back login registration separately from OS disable flags; preserve disabled Windows registrations and restore exact values if settings persistence fails.
+- Keep transient startup-network failures waiting with capped backoff, and allow Stop to cancel pending/paused restoration or clear a remembered running intent.
+- Derive both macOS rate-tray renderers from the same S artwork as the application instead of drawing a separate M glyph.
+- Retry only idempotent attachment reads after integrity failures, retain strict hash validation and the manifest barrier, and offer a trusted macOS runner for stalled Gitee upload routes.
+- Make GitHub release, Gitee code/releases, official website deployment and public verification mandatory parts of every release.
+
 ## 0.7.7 - 2026-09-10
 
 - Unify Serylane product, executable, installer, repository and download names while preserving existing data, signing keys, upgrade identity and byte-identical legacy updater aliases.

@@ -17,6 +17,7 @@ pub enum ResumePhase {
     Idle,
     Pending,
     Restoring,
+    WaitingNetwork,
     Restored,
     Paused,
 }
@@ -141,7 +142,7 @@ impl SessionResumeManager {
             // configuration permit but has not published Restoring yet.
             was_restoring = matches!(
                 state.status.phase,
-                ResumePhase::Pending | ResumePhase::Restoring
+                ResumePhase::Pending | ResumePhase::Restoring | ResumePhase::WaitingNetwork
             );
             state.generation = state.generation.wrapping_add(1);
             state.status = SessionResumeStatus {
@@ -254,30 +255,41 @@ async fn wait_for_manual_configuration<T>(
 
 async fn restore(app: AppHandle, plan: ResumePlan) {
     let manager = app.state::<SessionResumeManager>();
-    // A Wi-Fi/DHCP delay at login is not a permanent failure. Retry only typed
-    // transient preflight errors, release the configuration permit between
-    // attempts, and recheck user intent/ownership before every new process.
-    for (attempt, delay) in [1, 5, 15, 30].into_iter().enumerate() {
+    let mut attempt = 0_usize;
+    // A slow login network is not a user Stop. Keep the saved intent and retry
+    // at most once per minute after the initial backoff; cancellation wins.
+    loop {
+        let delay = restore_delay(attempt);
         if attempt > 0 {
-            manager.update(&app, plan.generation, ResumePhase::Pending,
-                format!("网络暂未就绪，{delay} 秒后重试恢复（{attempt}/3）；仍保留上次模式，可随时手动停止。"));
+            manager.update(
+                &app,
+                plan.generation,
+                ResumePhase::WaitingNetwork,
+                format!("网络暂未就绪，{delay} 秒后继续恢复；保留上次模式，点击停止可取消。"),
+            );
         }
         tokio::select! {
             biased;
             _ = manager.cancelled(plan.generation) => return,
             _ = tokio::time::sleep(Duration::from_secs(delay)) => {}
         }
-        if !restore_attempt(&app, &plan, attempt).await {
+        if !restore_attempt(&app, &plan).await {
             return;
         }
+        attempt = attempt.saturating_add(1);
     }
 }
 
-fn retry_restore(error: &crate::error::AppErrorDto, attempt: usize) -> bool {
-    attempt < 3 && error.code == "NETWORK_CHECK_FAILED" && error.retryable
+fn restore_delay(attempt: usize) -> u64 {
+    const DELAYS: [u64; 5] = [1, 5, 15, 30, 60];
+    DELAYS[attempt.min(DELAYS.len() - 1)]
 }
 
-async fn restore_attempt(app: &AppHandle, plan: &ResumePlan, attempt: usize) -> bool {
+fn retry_restore(error: &crate::error::AppErrorDto) -> bool {
+    error.code == "NETWORK_CHECK_FAILED" && error.retryable
+}
+
+async fn restore_attempt(app: &AppHandle, plan: &ResumePlan) -> bool {
     let manager = app.state::<SessionResumeManager>();
     let result = restore_preflight(app, plan);
     let (settings, proxy_guard, _configuration) = match result {
@@ -333,13 +345,13 @@ async fn restore_attempt(app: &AppHandle, plan: &ResumePlan, attempt: usize) -> 
             let _ = crate::platform::restore_system_proxy(app);
             let _ = runtime.stop(Some(app));
         }),
-        Err(error) if manager.current(plan.generation) && retry_restore(&error, attempt) => {
+        Err(error) if manager.current(plan.generation) && retry_restore(&error) => {
             // finish_runtime_start has already stopped the failed owned core.
             // It has not enabled System Proxy on a failed connectivity report.
             crate::app_log::record(
                 1,
                 crate::app_log::Area::Restore,
-                "临时联网预检失败，等待网络恢复后有限重试；未变更运行模式",
+                "临时联网预检失败，保留开启意图并等待网络恢复；未变更运行模式",
             );
             return true;
         }
@@ -399,16 +411,18 @@ mod tests {
     use uuid::Uuid;
 
     #[test]
-    fn login_retry_is_bounded_and_only_for_transient_network_preflight() {
+    fn login_retry_waits_for_transient_network_without_a_busy_loop() {
         let transient = AppError::NetworkPreflight {
             message: "fixture".into(),
             retryable: true,
         }
         .dto();
-        for attempt in 0..3 {
-            assert!(retry_restore(&transient, attempt));
-        }
-        assert!(!retry_restore(&transient, 3));
+        assert!(retry_restore(&transient));
+        assert_eq!(
+            (0..7).map(restore_delay).collect::<Vec<_>>(),
+            [1, 5, 15, 30, 60, 60, 60]
+        );
+        assert_eq!(restore_delay(usize::MAX), 60);
         for error in [
             AppError::NetworkPreflight {
                 message: "TLS".into(),
@@ -418,7 +432,7 @@ mod tests {
             AppError::Platform("not authorized".into()),
             AppError::Conflict("new owner".into()),
         ] {
-            assert!(!retry_restore(&error.dto(), 0));
+            assert!(!retry_restore(&error.dto()));
         }
     }
 
@@ -429,6 +443,22 @@ mod tests {
             active_revision_id: Some(Uuid::new_v4()),
             ..Default::default()
         }
+    }
+
+    #[tokio::test]
+    async fn waiting_for_network_is_cancelled_without_waiting_for_the_next_retry() {
+        let manager = SessionResumeManager::default();
+        let plan = manager.prepare(&AppSettings::default(), &state()).unwrap();
+        manager.state.lock().unwrap().status.phase = ResumePhase::WaitingNetwork;
+        assert!(manager.cancel());
+        tokio::time::timeout(
+            Duration::from_millis(100),
+            manager.cancelled(plan.generation),
+        )
+        .await
+        .expect("manual Stop interrupts the waiting generation");
+        assert!(!manager.current(plan.generation));
+        assert_eq!(manager.snapshot().phase, ResumePhase::Idle);
     }
 
     #[test]

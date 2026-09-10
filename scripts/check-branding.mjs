@@ -85,6 +85,13 @@ assert.ok(read("tests/fixtures/theme-preview.ts").includes(ruleMetadataPrefix));
 assert.ok(read("src-tauri/src/local_routing/codex.rs").includes(`const PROVIDER: &str = "routedeck"`));
 assert.ok(read("src-tauri/src/local_routing/codex.rs").includes('"codex-lease.json"'));
 assert.ok(read("src-tauri/src/local_routing/codex.rs").includes(`provider["name"] = value("${displayName} 本地路由")`));
+const tray = read("src-tauri/src/traffic_monitor.rs");
+assert.ok(tray.includes('tauri::include_image!("icons/128x128.png")'));
+assert.doesNotMatch(tray, /draw_m_mark|const M_X|const M_Y/);
+assert.equal((tray.match(/draw_brand_mark\(&mut rgba, width, HEIGHT,/g) ?? []).length, 2,
+  "Both macOS rate renderers must use the shared app mark");
+assert.deepEqual(readFileSync(join(root, "src-tauri/icons/128x128.png")),
+  readFileSync(join(root, "assets/brand/app-icon-128.png")), "Sidebar and tray must use identical app artwork");
 const updater = read("src-tauri/src/app_update.rs");
 for (const endpoint of [
   "https://github.com/CMMUU/serylane/releases/latest/download/latest-serylane.json",
