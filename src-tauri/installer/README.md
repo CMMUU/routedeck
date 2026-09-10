@@ -17,8 +17,20 @@ Application identifier, data directory, helper identity and signing key remain
 unchanged. Old updater clients still require RouteDeck-named signed aliases;
 these are byte-identical copies, not separately built executables.
 
-Before publishing, test fresh install and upgrades from 0.7.6 in disposable
-Windows x64/ARM64 machines: NSIS and MSI, with/without login startup, shortcuts,
-silent login, application update, and uninstall. Do not install test builds on
-the development user's live proxy machine. macOS/Linux packaging and login-entry
-migration also require platform verification before claiming support.
+The release workflow runs `scripts/test-windows-installers.ps1` after building
+on disposable GitHub-hosted Windows x64/ARM64 machines. It checks NSIS and MSI
+fresh installation, same-directory upgrade from checksum-verified 0.7.6,
+settings/shortcut preservation, owned login-entry migration, quiet `--autostart`
+versus visible manual launch, unchanged stopped-state proxy and uninstall.
+The script refuses to run outside the fixed repository's hosted runners or
+when pre-existing application data/login entries are present. It does not
+perform a physical reboot or claim live TUN/model-stream acceptance.
+Do not install test builds on the development user's live proxy machine.
+macOS/Linux login-entry migration still requires independent platform acceptance.
+
+For a normal release, dispatch **Release bundles** on `main` with
+`publish_current: true` and leave `release_tag` empty. Every platform must pass
+before the version tag is created and verified. Existing tags are never moved;
+use `release_tag` to repair the same tagged source. The default dispatch remains
+a non-publishing build. Signing checks and a complete artifact set are required
+before the GitHub draft becomes public; Gitee and website verification follow.

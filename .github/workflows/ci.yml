@@ -20,6 +20,8 @@ jobs:
           node-version: 22
       - name: Test publishing and Gitee synchronization
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
+      - name: Test immutable release-tag creation
+        run: node --test scripts/test-create-release-tag.mjs
 
   test:
     strategy:

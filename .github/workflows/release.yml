@@ -7,6 +7,11 @@ on:
         description: Existing stable tag to publish or repair; empty builds the selected ref without publishing
         required: false
         type: string
+      publish_current:
+        description: Build trusted main, verify every platform, then create its version tag and publish
+        required: false
+        type: boolean
+        default: false
   push:
     tags:
       - "v*"
@@ -23,6 +28,7 @@ jobs:
     outputs:
       commit: ${{ steps.resolve.outputs.commit }}
       tag: ${{ steps.resolve.outputs.tag }}
+      create_tag: ${{ steps.resolve.outputs.create_tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,9 +41,18 @@ jobs:
         id: resolve
         env:
           RELEASE_TAG: ${{ inputs.release_tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
+          PUBLISH_CURRENT: ${{ inputs.publish_current }}
         shell: bash
         run: |
           node scripts/version.mjs
+          if [ "$PUBLISH_CURRENT" = "true" ]; then
+            if [ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ] || [ "$GITHUB_REF" != "refs/heads/main" ] || [ -n "$RELEASE_TAG" ]; then
+              echo 'Publishing current source requires trusted main and no separate release_tag.'
+              exit 1
+            fi
+            RELEASE_TAG="v$(node -p 'JSON.parse(require("fs").readFileSync("package.json", "utf8")).version')"
+            echo 'create_tag=true' >> "$GITHUB_OUTPUT"
+          fi
           if [ -n "$RELEASE_TAG" ]; then
             node scripts/version.mjs --tag "$RELEASE_TAG"
           fi
@@ -181,10 +196,19 @@ jobs:
           node-version: 22
       - uses: dtolnay/rust-toolchain@stable
       - name: Test release publisher
-        run: python3 -m unittest discover -s scripts -p 'test_*.py'
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+          node --test scripts/test-create-release-tag.mjs
       - uses: actions/download-artifact@v4
         with:
           path: ${{ runner.temp }}/release-artifacts
+      - name: Create immutable version tag after every platform passed
+        if: needs.source.outputs.create_tag == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.source.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.source.outputs.commit }}
+        run: node scripts/create-release-tag.mjs
       - name: Generate and verify compliance assets, then publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
