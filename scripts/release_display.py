@@ -131,11 +131,16 @@ def normalize(gh, ge=None, apply=False):
             if apply:
                 path = f"{GITEE}/releases/{int(matching[0]['id'])}"
                 fresh = ge.request(path)
-                if any(fresh.get(k) != matching[0].get(k) for k in ('name', 'body', 'tag_name')):
+                protected = ('tag_name', 'target_commitish', 'prerelease', 'created_at')
+                if any(fresh.get(k) != matching[0].get(k) for k in ('name', 'body', *protected)):
                     raise ValueError('Gitee release changed since inspection')
-                ge.request(path, "PATCH", metadata)
+                # Gitee requires tag_name even for display-only PATCH. Echo the
+                # verified existing tag and prerelease state; never retarget it.
+                ge.request(path, "PATCH", {**metadata, 'tag_name': fresh['tag_name'],
+                                           'prerelease': str(bool(fresh.get('prerelease'))).lower()})
                 confirmed = ge.request(path)
-                if any((confirmed.get(k) or '').replace('\r\n', '\n') != v for k, v in metadata.items()):
+                if (any((confirmed.get(k) or '').replace('\r\n', '\n') != v for k, v in metadata.items())
+                        or any(confirmed.get(k) != fresh.get(k) for k in protected)):
                     raise ValueError("Gitee display update not confirmed")
         if apply:
             after = gh.pages(endpoint + '/assets')

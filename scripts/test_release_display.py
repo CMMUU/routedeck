@@ -76,6 +76,29 @@ class DisplayTests(unittest.TestCase):
             normalize(api, apply=True)
         self.assertEqual(api.writes, [])
 
+    def test_gitee_requires_original_tag_and_preserves_release_identity(self):
+        class GiteeApi(FakeApi):
+            def request(self, path, method='GET', data=None):
+                if path == '/repos/cmmuu/serylane':
+                    return {'id': 50078322}
+                if method != 'GET':
+                    assert method == 'PATCH'
+                    assert set(data) == {'name', 'body', 'tag_name', 'prerelease'}
+                    assert data['tag_name'] == self.release['tag_name']
+                    assert data['prerelease'] == str(self.release['prerelease']).lower()
+                    self.writes.append((path, copy.deepcopy(data)))
+                    self.release.update({**data, 'prerelease': data['prerelease'] == 'true'})
+                return copy.deepcopy(self.release)
+        github, gitee = FakeApi(), GiteeApi()
+        gitee.release['target_commitish'] = 'a' * 40
+        normalize(github, gitee, apply=True)
+        self.assertEqual(gitee.release['name'], 'Serylane v0.7.6')
+        self.assertEqual(gitee.release['tag_name'], 'v0.7.6')
+        self.assertEqual(gitee.release['target_commitish'], 'a' * 40)
+        self.assertEqual(len(gitee.writes), 1)
+        normalize(github, gitee, apply=True)
+        self.assertEqual(len(gitee.writes), 1)
+
 
 if __name__ == '__main__':
     unittest.main()
