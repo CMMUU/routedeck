@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.7.7 - 2026-09-10
+
+- Unify Serylane product, executable, installer, repository and download names while preserving existing data, signing keys, upgrade identity and byte-identical legacy updater aliases.
+- Add optional quiet login startup, preserve the last saved network mode and running intent, and make the main Start button respect that mode. Keep manual launch visible and require permission/conflict checks for restoration.
+- Add compact application logs with filtering, duplicate aggregation, a 256 KiB / 2,000-entry cap and configurable retention of 1–90 days (default three days).
+- Classify startup connectivity failures, retry transient checks within fixed bounds, preserve explicit subscription health-check settings and retain matching-node stability evidence across policy updates.
+- Hide application scrollbars and add continuous smooth wheel scrolling with touchpad, keyboard and reduced-motion compatibility.
+- Resolve official website downloads from the latest verified stable release at click time, distinguish Intel and Apple-silicon macOS packages, and deploy/verify the website after repository and release synchronization.
+- Gate publication on six-platform tests, signed updater validation and disposable Windows installer/startup checks. Automated tests do not establish uninterrupted model streams, physical reboot acceptance or real-world TUN compatibility.
+
 ## 0.7.6 - 2026-09-08
 
 - Make Subscriptions the single entry point for adding subscription URLs. Overview empty states navigate there; Profiles retains local YAML import, configuration management and version rollback.
