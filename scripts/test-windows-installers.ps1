@@ -31,6 +31,35 @@ function Proxy-Snapshot {
     $fields | ConvertTo-Json -Compress
 }
 $proxyBefore = Proxy-Snapshot
+# Process.MainWindowHandle may select Tauri's tray/event-loop helper window.
+# Inspect the actual named application window, including hidden top-level windows.
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class InstallerWindows {
+    public delegate bool Callback(IntPtr handle, IntPtr parameter);
+    [DllImport("user32.dll")] static extern bool EnumWindows(Callback callback, IntPtr parameter);
+    [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr handle, out uint process);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr handle, StringBuilder text, int maximum);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr handle);
+    public sealed class Window { public string Title; public bool Visible; }
+    public static Window[] ForProcess(int process) {
+        var found = new List<Window>();
+        EnumWindows((handle, parameter) => {
+            uint owner; GetWindowThreadProcessId(handle, out owner);
+            if (owner == process) {
+                var title = new StringBuilder(512);
+                GetWindowText(handle, title, title.Capacity);
+                found.Add(new Window { Title=title.ToString(), Visible=IsWindowVisible(handle) });
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found.ToArray();
+    }
+}
+'@
 function Run-Installer([string]$file, [string]$arguments) {
     $process = Start-Process -FilePath $file -ArgumentList $arguments -PassThru -WindowStyle Hidden
     if (!$process.WaitForExit(180000)) { throw 'Installer did not finish within three minutes.' }
@@ -99,9 +128,12 @@ function Assert-Application([string]$executable, [bool]$login) {
             if (!$ready) { throw 'Installed application did not reach initialized logging.' }
             Start-Sleep -Seconds 3
             $process.Refresh()
-            if ($quiet -and $process.MainWindowHandle -ne 0) { throw 'Silent login unexpectedly showed a main window.' }
-            if (!$quiet -and $process.MainWindowHandle -eq 0) { throw 'Manual launch failed to show the main window.' }
-            if (!$quiet -and $process.MainWindowTitle -ne 'Serylane') { throw 'Installed window has the wrong product name.' }
+            $windows = @([InstallerWindows]::ForProcess($process.Id))
+            Write-Host "Window check (quiet=$quiet): $($windows | ConvertTo-Json -Compress)"
+            $main = @($windows | Where-Object { $_.Title -eq 'Serylane' })
+            if ($main.Count -ne 1) { throw 'Installed application must have exactly one Serylane main window.' }
+            if ($quiet -and $main[0].Visible) { throw 'Silent login unexpectedly showed the Serylane main window.' }
+            if (!$quiet -and !$main[0].Visible) { throw 'Manual launch failed to show the Serylane main window.' }
             if ($login) {
                 $entry = Read-Run 'Serylane'
                 if (!$entry -or !$entry.Contains($executable) -or !$entry.Contains('--autostart') -or (Read-Run 'RouteDeck')) {

@@ -161,6 +161,7 @@ jobs:
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - name: Build signed installers and updater artifacts
+        id: signed_build
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -176,6 +177,7 @@ jobs:
         shell: pwsh
         run: ./scripts/test-windows-installers.ps1 -Architecture '${{ matrix.artifact == 'windows-arm64' && 'arm64' || 'x64' }}'
       - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() && steps.signed_build.outcome == 'success' }}
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.paths }}
