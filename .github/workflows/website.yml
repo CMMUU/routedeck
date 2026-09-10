@@ -1,4 +1,4 @@
-name: Website checks
+name: Website checks and deployment
 
 on:
   push:
@@ -6,6 +6,15 @@ on:
     paths: ['website/**', '.github/workflows/website.yml']
   pull_request:
     paths: ['website/**', '.github/workflows/website.yml']
+  workflow_call:
+    inputs:
+      deploy:
+        type: boolean
+        default: false
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        required: true
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -32,3 +41,40 @@ jobs:
       - run: pnpm test
       - run: pnpm typecheck
       - run: pnpm deploy:check
+  deploy:
+    # Reusable calls come only from the trusted synchronizer. Manual runs must
+    # target main. PR checks never receive production credentials.
+    if: >-
+      github.repository == 'CMMUU/serylane' &&
+      (inputs.deploy == true ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+    needs: static-site
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    concurrency:
+      group: serylane-website-production
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: website/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - name: Test, deploy existing Worker and verify online source and downloads
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: '97eb9abaee45ec161253c18426b7b51b'
+          GITHUB_TOKEN: ${{ github.token }}
+          WRANGLER_SEND_METRICS: 'false'
+        run: pnpm run deploy

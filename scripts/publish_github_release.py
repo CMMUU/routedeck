@@ -18,6 +18,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from generate_compliance import INPUT_PATHS, markdown as compliance_markdown, property_value
 from updater_release import stage_updaters
+from release_display import asset_label
 
 
 REPOSITORY = "CMMUU/serylane"
@@ -37,10 +38,8 @@ def release_title(tag):
     match = re.fullmatch(r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)", tag)
     if not match:
         raise ReleaseError("Release title requires an exact stable version tag")
-    # Display-only transition. Old tags keep their default title, while already
-    # published releases below are never patched, regardless of their branding.
-    brand = "Serylane" if tuple(map(int, match.groups())) >= (0, 7, 4) else "RouteDeck"
-    return f"{brand} {tag}"
+    # Current display brand; package filenames still follow their tagged source.
+    return f"Serylane {tag}"
 
 
 def package_names(version):
@@ -276,6 +275,9 @@ class GitHub:
 
     def upload(self, release_id, path):
         endpoint = f"https://uploads.github.com/repos/{REPOSITORY}/releases/{release_id}/assets?name={quote(path.name)}"
+        label = asset_label(path.name)
+        if label:
+            endpoint += f"&label={quote(label)}"
         return json.loads(self.command(["api", endpoint, "--method", "POST", "--input", str(path),
                                         "-H", "Content-Type: application/octet-stream"]))
 

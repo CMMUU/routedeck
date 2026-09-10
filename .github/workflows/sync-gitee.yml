@@ -107,3 +107,12 @@ jobs:
               ;;
           esac
           python3 scripts/sync_gitee.py "${args[@]}"
+  website:
+    name: Synchronize and verify official website
+    needs: sync
+    if: inputs.dry_run != true
+    uses: ./.github/workflows/website.yml
+    with:
+      deploy: true
+    secrets:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

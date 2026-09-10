@@ -8,5 +8,9 @@
 /404.html
   X-Robots-Tag: noindex
 
+/build-info.json
+  Cache-Control: no-store
+  X-Robots-Tag: noindex
+
 /assets/*
   Cache-Control: public, max-age=86400

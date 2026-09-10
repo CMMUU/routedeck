@@ -62,7 +62,7 @@ function createPage(fetchResult) {
     };
   }
   const selectors = new Map();
-  for (const id of ['main-nav', 'platform-name', 'download-panel', 'download-github', 'download-gitee', 'channel-note', 'download-selection', 'release-status', 'release-retry']) {
+  for (const id of ['main-nav', 'platform-name', 'download-panel', 'download-github', 'download-gitee', 'channel-note', 'download-selection', 'release-status', 'release-retry', 'architecture-selector', 'mac-chip-help']) {
     selectors.set(`#${id}`, element(byId(id)));
   }
   selectors.set('.menu-toggle', element(oneTag(tag => hasClass(tag, 'menu-toggle'))));
@@ -118,6 +118,17 @@ function verifySelection(view, target) {
     assert.equal(tab.tabIndex, tab.dataset.system === system ? 0 : -1);
   }
   for (const button of view.architectures) assert.equal(button.getAttribute('aria-pressed'), String(button.dataset.architecture === architecture));
+  assert.equal(view.query('#mac-chip-help').hidden, system !== 'macos');
+  for (const button of view.architectures) {
+    const label = system === 'macos'
+      ? button.dataset.architecture === 'arm64' ? 'Apple 芯片（M 系列）' : 'Intel 芯片'
+      : button.dataset.architecture === 'arm64' ? 'ARM64' : 'x64';
+    assert.equal(button.textContent, label);
+    if (button.dataset.architecture === architecture) {
+      assert.ok(view.gitee.getAttribute('aria-label').includes(label));
+      assert.ok(view.query('#download-selection').textContent.includes(label));
+    }
+  }
   for (const link of [view.github, view.gitee]) {
     assert.equal(link.getAttribute('target'), '_blank');
     assert.match(link.getAttribute('rel'), /noopener/);

@@ -289,13 +289,13 @@ class ReleaseTests(unittest.TestCase):
         method, payload = api.writes[0]
         self.assertEqual(method, "PATCH")
         self.assertFalse(payload["draft"])
-        self.assertEqual(payload["name"], f"RouteDeck {TAG}")
+        self.assertEqual(payload["name"], f"Serylane {TAG}")
         self.assertEqual(payload["body"], notes)
-        self.assertEqual(api.release["name"], f"RouteDeck {TAG}")
+        self.assertEqual(api.release["name"], f"Serylane {TAG}")
         self.assertEqual(api.release["body"], notes)
 
     def test_brand_transition_preserves_historical_names_and_renames_new_packages(self):
-        self.assertEqual(release_title("v0.7.3"), "RouteDeck v0.7.3")
+        self.assertEqual(release_title("v0.7.3"), "Serylane v0.7.3")
         for version in ("0.7.4", "0.8.0", "0.10.0", "1.0.0"):
             self.assertEqual(release_title(f"v{version}"), f"Serylane v{version}")
             self.assertEqual(package_names(version), {

@@ -4,3 +4,4 @@ node_modules/
 .env*
 dist/
 worker-configuration.d.ts
+public/build-info.json

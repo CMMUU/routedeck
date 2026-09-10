@@ -34,9 +34,15 @@
   let loading = true;
   let selectedSystem = "windows";
   let selectedArchitecture = "x64";
+  function architectureLabel(architecture) {
+    if (selectedSystem === "macos") return architecture === "arm64" ? "Apple 芯片（M 系列）" : "Intel 芯片";
+    return architecture === "arm64" ? "ARM64" : "x64";
+  }
   function updateDownloadSelection() {
     const system = systems[selectedSystem];
-    const architecture = selectedArchitecture === "arm64" ? "ARM64" : "x64";
+    const architecture = architectureLabel(selectedArchitecture);
+    document.querySelector("#architecture-selector").setAttribute("data-platform", selectedSystem);
+    document.querySelector("#mac-chip-help").hidden = selectedSystem !== "macos";
     document.querySelector("#platform-name").textContent = system.name;
     document.querySelector("#platform-icon use").setAttribute("href", `#i-${system.icon}`);
     document.querySelector("#download-panel").setAttribute("aria-labelledby", `tab-${selectedSystem}`);
@@ -48,6 +54,7 @@
     });
     architectureButtons.forEach(button => {
       button.disabled = false;
+      button.textContent = architectureLabel(button.dataset.architecture);
       button.setAttribute("aria-pressed", String(button.dataset.architecture === selectedArchitecture));
     });
     const target = `${selectedSystem}-${selectedArchitecture}`;

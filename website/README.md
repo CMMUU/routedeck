@@ -34,12 +34,16 @@ pnpm deploy:check
 
 1. `pnpm exec wrangler whoami --json` 检查账号。尚未登录时，可执行 `pnpm exec wrangler login --device --browser=false`，由账号所有者在官方页面授权；不要在聊天、Git 或站点文件中放入 Token。
 2. 在 Cloudflare 中确认 `cmmuu.com` 为正确账号的有效 zone。核对 `serylane.cmmuu.com` 的**准确 DNS 记录、Workers 自定义域名绑定和现有用途**。公共 DNS 返回 Cloudflare 地址也可能来自泛解析，不代表该子域名空闲。
-3. 确认不会覆盖其他站点后，运行 `pnpm deploy`。配置只包含该子域名，不修改根域名、其他网站、账户安全设置或通配符 DNS。
+3. 提交并推送已审阅的源码至 GitHub `main` 后，运行 `pnpm run deploy`（必须显式写 `run`，避免误用 pnpm 的同名工作区命令）。脚本仅上传版本并切换现有 Worker 的流量；不会修改根域名、其他网站或 DNS。
 4. 验收主页与四篇文档 HTTPS 200，未知路径 404、`.html` 别名归一化、robots、sitemap、canonical 和下载链接。成功后才更新仓库 About 的 Homepage、README 的部署状态。
 
-注意：已安装的 Wrangler 4.129.0 在非交互自定义域名部署中会启用覆盖选项。不要在未核对现有 DNS/绑定时直接后台运行带域名的 `pnpm deploy`。首次上线采用分步上传与显式禁止覆盖的绑定；后续发布同样先验证域名归属与目标 Worker，遇到冲突停止。Wrangler 的 changeset/records 为其内部接口，不能视作稳定的公开 API；升级 CLI 后须重新核查部署行为。
+注意：Wrangler 的直接 `deploy` 命令可能处理并覆盖自定义域名绑定，因此 `pnpm run deploy` 已封装为严格的版本上传／部署脚本。不要绕开脚本直接执行 `wrangler deploy` 或 `triggers deploy`。首次域名绑定不属于普通页面发布流程；CLI 升级后须重新核查行为。
 
-CI 仅检查，不存储 Cloudflare 凭据，也不会自动登录或部署。不得在缺少授权时把 `deploy --dry-run` 当成上线成功。
+GitHub Actions 中的 `Sync GitHub to Gitee` 在每次成功的非预演同步后，调用官网检查、部署和线上验收。官网 PR／push 检查本身不使用生产凭据；正式部署只检出受信任的最新 `main`，并串行执行。手动运行 `Website checks and deployment` 也可部署。账户专用 `CLOUDFLARE_API_TOKEN` 存入该仓库的 Actions Secrets，仅需目标账户的 Workers Scripts 编辑权限，不授予 DNS／域名路由编辑权限。缺失凭据会明确失败，不能把 dry-run 或源码同步成功当成网站已上线。
+
+部署生成不入库的 `/build-info.json`，记录源码提交、website 树及公共页面摘要。上传后再次确认 `main` 未变化，再激活准确版本；回读线上标记和实际 HTML／JS／CSS／文档字节，并验收六个架构的最新下载跳转。校验失败会阻止报告同步成功，但不会擅自回滚或重写域名。若上传期间 `main` 已更新，停止激活，由新一轮同步部署最新源码。
+
+每次功能变更还需人工／开发代理同步审阅官网功能文案、使用文档、README 和发布说明；自动部署负责发布已提交的内容，不会自动推断或编写新功能介绍。持续约束见根目录 `AGENTS.md`。
 
 对于已经绑定正确域名的官网，更新静态资源优先使用 `wrangler versions upload --keep-vars`，再将返回的准确版本 ID 以 `wrangler versions deploy <VERSION_ID>@100` 上线；先执行 `versions upload --dry-run`。已核对 Wrangler 4.129.0：该路径不运行域名／路由触发器部署，不需要再次绑定域名。不要使用 `triggers deploy` 或覆盖选项来发布普通页面更新。新部署后再次核对公共页面和下载链接，记录版本 ID 以便回滚。
 
@@ -60,6 +64,8 @@ CI 仅检查，不存储 Cloudflare 凭据，也不会自动登录或部署。�
 ### 新版本自动接入
 
 `scripts/publish_github_release.py` 从 v0.7.7 起，在主包齐全且更新签名校验通过后生成 `downloads.json`（schemaVersion、v 前缀版本、六个目标的 filename/size/sha256）。该清单纳入 `SHA256SUMS.txt`；全部附件上传并验证后才将 draft 发布为正式版。官网不需要修改版本号或重新部署。
+
+macOS 页面和文档明确区分 Intel 芯片（x64）与 Apple 芯片（M 系列，ARM64），无 JavaScript 时也有各自的动态下载链接。Releases 标题及安装包 `label` 使用 Serylane；历史二进制真实 `name`、URL、摘要和签名不变。需要整理既有发布记录时运行 `Release display metadata` 工作流，默认预演；确认应用后仅更新 GitHub/Gitee 的展示元数据，不创建、删除或重新上传附件。Gitee 不支持独立附件显示标签，历史真实文件名仍保留以兼容更新。
 
 Gitee 同步把 `downloads.json` 与四份更新清单放在所有普通附件验证完成后的屏障后上传。清理旧附件时先撤下清单。镜像没同步完时官网使用 GitHub **同版本**，不使用旧的 Gitee 最新版。此变更不修改保留历史的范围或触发新应用版本发布。
 
