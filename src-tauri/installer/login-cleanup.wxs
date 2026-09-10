@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <!-- Referencing this group links the complete fragment into the product. -->
+    <ComponentGroup Id="SerylaneLoginCleanup" />
+    <!-- Run in the invoking user's context, without opening the application UI.
+         Missing/damaged executables must not prevent users from uninstalling. -->
+    <CustomAction Id="SerylaneRemoveOwnedLogin" FileKey="Path"
+                  ExeCommand="--installer-remove-login" Execute="immediate"
+                  Impersonate="yes" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="SerylaneRemoveOwnedLogin" Before="RemoveFiles">
+        Installed AND REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE
+      </Custom>
+    </InstallExecuteSequence>
+  </Fragment>
+</Wix>

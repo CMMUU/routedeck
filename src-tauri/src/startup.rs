@@ -5,6 +5,44 @@ use tauri_plugin_autostart::ManagerExt;
 
 pub const AUTOSTART_ARG: &str = "--autostart";
 
+#[cfg(any(windows, test))]
+pub fn installer_cleanup_requested(args: &[String]) -> bool {
+    args == ["--installer-remove-login"]
+}
+
+// The MSI uninstall hook runs this before removing our executable. No Tauri
+// window, proxy, user settings or other installation's login entries are touched.
+#[cfg(windows)]
+pub fn remove_owned_login_entries() -> std::io::Result<()> {
+    use winreg::{
+        enums::{HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE},
+        RegKey,
+    };
+    let key = match RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(
+        r"Software\Microsoft\Windows\CurrentVersion\Run",
+        KEY_READ | KEY_SET_VALUE,
+    ) {
+        Ok(key) => key,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let executable = std::env::current_exe()?;
+    for name in ["Serylane", "RouteDeck"] {
+        let command: Option<String> = key.get_value(name).ok();
+        if command
+            .as_deref()
+            .is_some_and(|command| owns_legacy_entry(command, &executable))
+        {
+            match key.delete_value(name) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+        }
+    }
+    Ok(())
+}
+
 pub fn show_initial_window(settings: &AppSettings, args: &[String]) -> bool {
     !(settings.silent_startup && args.iter().any(|arg| arg == AUTOSTART_ARG))
 }
@@ -84,6 +122,21 @@ fn owns_legacy_entry(command: &str, executable: &std::path::Path) -> bool {
 mod tests {
     use super::*;
     #[test]
+    fn uninstall_command_is_exact_and_never_matches_normal_launch() {
+        assert!(installer_cleanup_requested(&[
+            "--installer-remove-login".into()
+        ]));
+        assert!(!installer_cleanup_requested(&[]));
+        assert!(!installer_cleanup_requested(&[AUTOSTART_ARG.into()]));
+        assert!(!installer_cleanup_requested(&[
+            "--installer-remove-login-other".into()
+        ]));
+        assert!(!installer_cleanup_requested(&[
+            "--installer-remove-login".into(),
+            "extra".into()
+        ]));
+    }
+    #[test]
     fn silent_login_does_not_hide_manual_launch() {
         let mut settings = AppSettings::default();
         assert!(show_initial_window(&settings, &[AUTOSTART_ARG.into()]));
@@ -104,5 +157,11 @@ mod tests {
         assert!(owns_legacy_entry(&format!("{old} --autostart"), &current));
         assert!(!owns_legacy_entry(&format!("{old} --unexpected"), &current));
         assert!(!owns_legacy_entry("\"other/routedeck.exe\"", &current));
+        let current_command = format!("\"{}\" {AUTOSTART_ARG}", current.display());
+        assert!(owns_legacy_entry(&current_command, &current));
+        assert!(!owns_legacy_entry(
+            &format!("{current_command} extra"),
+            &current
+        ));
     }
 }

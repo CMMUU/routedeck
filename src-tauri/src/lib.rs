@@ -960,6 +960,14 @@ fn show_home_window(app: &AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(windows)]
+    if startup::installer_cleanup_requested(&std::env::args().skip(1).collect::<Vec<_>>()) {
+        std::process::exit(if startup::remove_owned_login_entries().is_ok() {
+            0
+        } else {
+            1
+        });
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())

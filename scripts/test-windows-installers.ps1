@@ -13,6 +13,11 @@ $testRoot = Join-Path $env:RUNNER_TEMP ('serylane-install-' + [guid]::NewGuid().
 New-Item -ItemType Directory -Path $testRoot | Out-Null
 $dataRoot = Join-Path $env:APPDATA 'com.cmmuu.mihomodesktop'
 if (Test-Path -LiteralPath $dataRoot) { throw 'Runner contains existing application data; refusing to touch it.' }
+foreach ($brand in @('RouteDeck','Serylane')) {
+    if (Test-Path -LiteralPath "HKCU:\Software\cmmuu\$brand") {
+        throw 'Runner contains existing product installation records; refusing to touch them.'
+    }
+}
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $proxyKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
 function Read-Run([string]$name) {
@@ -106,6 +111,25 @@ function Write-Fixture([bool]$login) {
     } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $dataRoot 'state.json') -Encoding utf8
     'preserve-upgrade-data' | Set-Content -LiteralPath (Join-Path $dataRoot 'installer-sentinel.txt') -Encoding utf8
 }
+function Reset-FixtureInstallLocations {
+    # NSIS intentionally preserves installation-location metadata on uninstall.
+    # It must not redirect the next independent MSI scenario to the preceding fixture.
+    foreach ($brand in @('RouteDeck','Serylane')) {
+        $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Software\cmmuu\$brand", $true)
+        if (!$key) { continue }
+        try {
+            foreach ($name in @('', 'InstallDir')) {
+                $value = $key.GetValue($name, $null)
+                if (!$value) { continue }
+                $resolved = [IO.Path]::GetFullPath([string]$value)
+                if (!$resolved.StartsWith([IO.Path]::GetFullPath($testRoot) + '\', [StringComparison]::OrdinalIgnoreCase)) {
+                    throw 'Installer location is not owned by this isolated test.'
+                }
+                $key.DeleteValue($name, $false)
+            }
+        } finally { $key.Dispose() }
+    }
+}
 function Assert-Application([string]$executable, [bool]$login) {
     $settings = Get-Content -LiteralPath (Join-Path $dataRoot 'settings.json') -Raw | ConvertFrom-Json
     if ($settings.networkMode -ne 'system_proxy' -or !$settings.silentStartup -or $settings.appLogRetentionDays -ne 3) {
@@ -180,6 +204,7 @@ foreach ($kind in @('nsis','msi')) {
     $current = Join-Path $repo "src-tauri/target/release/bundle/$kind/Serylane_${version}_$suffix"
     if (!(Test-Path -LiteralPath $current)) { throw 'Expected signed build installer is missing.' }
     foreach ($scenario in @('fresh','upgrade','upgrade-login')) {
+        Reset-FixtureInstallLocations
         $directory = Join-Path $testRoot "$kind-$scenario"
         $login = $scenario -eq 'upgrade-login'
         Write-Fixture $login

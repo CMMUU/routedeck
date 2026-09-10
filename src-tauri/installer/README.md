@@ -17,6 +17,12 @@ Application identifier, data directory, helper identity and signing key remain
 unchanged. Old updater clients still require RouteDeck-named signed aliases;
 these are byte-identical copies, not separately built executables.
 
+The WiX `login-cleanup.wxs` fragment invokes an exact, UI-free application
+command before a normal uninstall, never during an upgrade. It removes only
+current-user login commands pointing exactly at this installation's executable;
+saved settings, proxy state and other copies are left alone. Cleanup is best
+effort so a damaged/missing executable cannot trap users in an uninstall failure.
+
 The release workflow runs `scripts/test-windows-installers.ps1` after building
 on disposable GitHub-hosted Windows x64/ARM64 machines. It checks NSIS and MSI
 fresh installation, same-directory upgrade from checksum-verified 0.7.6,

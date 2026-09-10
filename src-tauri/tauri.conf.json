@@ -35,7 +35,11 @@
     "createUpdaterArtifacts": true,
     "targets": "all",
     "windows": {
-      "wix": { "upgradeCode": "3dc8b957-21f1-51b9-ab4c-df67ce49b53d" },
+      "wix": {
+        "upgradeCode": "3dc8b957-21f1-51b9-ab4c-df67ce49b53d",
+        "fragmentPaths": ["installer/login-cleanup.wxs"],
+        "componentGroupRefs": ["SerylaneLoginCleanup"]
+      },
       "nsis": { "template": "installer/installer.nsi" }
     },
     "macOS": {
