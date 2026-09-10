@@ -74,9 +74,9 @@ function Assert-Application([string]$executable, [bool]$login) {
         throw 'Installer failed to preserve the saved settings.'
     }
     foreach ($quiet in @($true, $false)) {
-        $args = @{FilePath=$executable; PassThru=$true; WindowStyle='Hidden'}
-        if ($quiet) { $args.ArgumentList = '--autostart' }
-        $process = Start-Process @args
+        $launchArgs = @{FilePath=$executable; PassThru=$true; WindowStyle='Hidden'}
+        if ($quiet) { $launchArgs.ArgumentList = '--autostart' }
+        $process = Start-Process @launchArgs
         try {
             $deadline = [DateTime]::UtcNow.AddSeconds(30)
             $journal = Join-Path $dataRoot 'app-log-v1.json'
@@ -126,6 +126,7 @@ function Assert-Shortcuts([string]$executable) {
 }
 $base = 'https://github.com/CMMUU/serylane/releases/download/v0.7.6'
 $hashes = (Invoke-WebRequest -Uri "$base/SHA256SUMS.txt").Content
+if ($hashes -is [byte[]]) { $hashes = [Text.Encoding]::UTF8.GetString($hashes) }
 foreach ($kind in @('nsis','msi')) {
     $suffix = if ($kind -eq 'nsis') { "$Architecture-setup.exe" } else { "${Architecture}_en-US.msi" }
     $legacyName = "RouteDeck_0.7.6_$suffix"
