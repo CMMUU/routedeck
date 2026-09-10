@@ -9,7 +9,7 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_ENVIRONMENT -ne 'github-hoste
 }
 $repo = Split-Path $PSScriptRoot -Parent
 $version = (Get-Content -LiteralPath (Join-Path $repo 'package.json') -Raw | ConvertFrom-Json).version
-$testRoot = Join-Path $env:RUNNER_TEMP ('serylane-install-' + [guid]::NewGuid().ToString('N'))
+$testRoot = Join-Path $env:RUNNER_TEMP ('serylane install ' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $testRoot | Out-Null
 $dataRoot = Join-Path $env:APPDATA 'com.cmmuu.mihomodesktop'
 if (Test-Path -LiteralPath $dataRoot) { throw 'Runner contains existing application data; refusing to touch it.' }
@@ -19,6 +19,14 @@ foreach ($brand in @('RouteDeck','Serylane')) {
     }
 }
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$approvalKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+if (Test-Path -LiteralPath $approvalKey) {
+    foreach ($brand in @('RouteDeck','Serylane')) {
+        if ($null -ne (Get-Item -LiteralPath $approvalKey).GetValue($brand, $null)) {
+            throw 'Runner contains a pre-existing product startup approval.'
+        }
+    }
+}
 $proxyKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
 function Read-Run([string]$name) {
     if (!(Test-Path -LiteralPath $runKey)) { return $null }
@@ -130,7 +138,7 @@ function Reset-FixtureInstallLocations {
         } finally { $key.Dispose() }
     }
 }
-function Assert-Application([string]$executable, [bool]$login) {
+function Assert-Application([string]$executable, [bool]$login, [bool]$osDisabled) {
     $settings = Get-Content -LiteralPath (Join-Path $dataRoot 'settings.json') -Raw | ConvertFrom-Json
     if ($settings.networkMode -ne 'system_proxy' -or !$settings.silentStartup -or $settings.appLogRetentionDays -ne 3) {
         throw 'Installer failed to preserve the saved settings.'
@@ -160,8 +168,12 @@ function Assert-Application([string]$executable, [bool]$login) {
             if (!$quiet -and !$main[0].Visible) { throw 'Manual launch failed to show the Serylane main window.' }
             if ($login) {
                 $entry = Read-Run 'Serylane'
-                if (!$entry -or !$entry.Contains($executable) -or !$entry.Contains('--autostart') -or (Read-Run 'RouteDeck')) {
+                if ($entry -ne "`"$executable`" --autostart" -or (Read-Run 'RouteDeck')) {
                     throw 'Owned legacy login registration was not migrated correctly.'
+                }
+                if ($osDisabled) {
+                    $approval = (Get-Item -LiteralPath $approvalKey).GetValue('Serylane', $null)
+                    if (!$approval -or $approval[0] -ne 3) { throw 'Migration re-enabled a Task Manager-disabled login entry.' }
                 }
             } elseif ((Read-Run 'Serylane') -or (Read-Run 'RouteDeck')) { throw 'Startup was enabled without consent.' }
             if ((Proxy-Snapshot) -ne $proxyBefore) { throw 'Stopped-state login changed Windows proxy settings.' }
@@ -203,10 +215,16 @@ foreach ($kind in @('nsis','msi')) {
     }
     $current = Join-Path $repo "src-tauri/target/release/bundle/$kind/Serylane_${version}_$suffix"
     if (!(Test-Path -LiteralPath $current)) { throw 'Expected signed build installer is missing.' }
-    foreach ($scenario in @('fresh','upgrade','upgrade-login')) {
+    foreach ($scenario in @('fresh','upgrade','upgrade-login','upgrade-login-disabled')) {
         Reset-FixtureInstallLocations
+        $approval = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run', $true)
+        if ($approval) {
+            try { $approval.DeleteValue('RouteDeck', $false); $approval.DeleteValue('Serylane', $false) }
+            finally { $approval.Dispose() }
+        }
         $directory = Join-Path $testRoot "$kind-$scenario"
-        $login = $scenario -eq 'upgrade-login'
+        $login = $scenario.StartsWith('upgrade-login')
+        $osDisabled = $scenario -eq 'upgrade-login-disabled'
         Write-Fixture $login
         $settingsBefore = (Get-FileHash -LiteralPath (Join-Path $dataRoot 'settings.json')).Hash
         if ($scenario -ne 'fresh') {
@@ -214,7 +232,13 @@ foreach ($kind in @('nsis','msi')) {
             if (!(Test-Path -LiteralPath (Join-Path $directory 'routedeck.exe'))) { throw 'Baseline installation not found at requested directory.' }
             if ($login) {
                 if (!(Test-Path -LiteralPath $runKey)) { New-Item -Path $runKey | Out-Null }
-                New-ItemProperty -LiteralPath $runKey -Name 'RouteDeck' -Value "`"$directory\routedeck.exe`"" -PropertyType String -Force | Out-Null
+                # Real auto-launch 0.5 legacy serialization: unquoted path, no args, trailing space.
+                New-ItemProperty -LiteralPath $runKey -Name 'RouteDeck' -Value "$directory\routedeck.exe " -PropertyType String -Force | Out-Null
+                if ($osDisabled) {
+                    $approval = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run')
+                    try { $approval.SetValue('RouteDeck', [byte[]]@(3,0,0,0,0,0,0,0,0,0,0,0), [Microsoft.Win32.RegistryValueKind]::Binary) }
+                    finally { $approval.Dispose() }
+                }
             }
         }
         Install-Package $current $directory
@@ -224,7 +248,7 @@ foreach ($kind in @('nsis','msi')) {
         if (Test-Path -LiteralPath (Join-Path $directory 'routedeck.exe')) { throw 'Upgrade left the old main executable behind.' }
         if ((Get-FileHash -LiteralPath (Join-Path $dataRoot 'settings.json')).Hash -ne $settingsBefore) { throw 'Upgrade rewrote application settings.' }
         Assert-Shortcuts $executable
-        Assert-Application $executable $login
+        Assert-Application $executable $login $osDisabled
         Uninstall-Package $current $directory
         if ((Read-Run 'Serylane') -or (Read-Run 'RouteDeck')) { throw 'Uninstall left owned login registration.' }
         if (!(Test-Path -LiteralPath (Join-Path $dataRoot 'installer-sentinel.txt'))) { throw 'Default uninstall removed user data.' }

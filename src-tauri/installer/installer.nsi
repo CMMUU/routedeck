@@ -690,6 +690,9 @@ Section Install
   ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "RouteDeck"
   ${If} $0 == '$\"$INSTDIR\routedeck.exe$\"'
   ${OrIf} $0 == '$\"$INSTDIR\routedeck.exe$\" --autostart'
+  ${OrIf} $0 == '$INSTDIR\routedeck.exe'
+  ${OrIf} $0 == '$INSTDIR\routedeck.exe '
+  ${OrIf} $0 == '$INSTDIR\routedeck.exe --autostart'
     ; Keep the old key until the app can migrate StartupApproved together with
     ; the display name. Renaming only Run would re-enable a Task Manager-disabled entry.
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "RouteDeck" '$\"$INSTDIR\${MAINBINARYNAME}.exe$\" --autostart'

@@ -1,7 +1,5 @@
 use crate::{error::AppResult, models::AppSettings};
 use tauri::AppHandle;
-#[cfg(windows)]
-use tauri_plugin_autostart::ManagerExt;
 
 pub const AUTOSTART_ARG: &str = "--autostart";
 
@@ -50,7 +48,7 @@ pub fn show_initial_window(settings: &AppSettings, args: &[String]) -> bool {
 // Migrate only our own existing login entry. Never enable a missing/externally
 // disabled entry at startup, or delete an entry pointing at a different copy.
 #[cfg(windows)]
-pub fn migrate_login_entry(app: &AppHandle, settings: &AppSettings) -> AppResult<()> {
+pub fn migrate_login_entry(_app: &AppHandle, settings: &AppSettings) -> AppResult<()> {
     use winreg::{
         enums::{HKEY_CURRENT_USER, KEY_READ, KEY_SET_VALUE},
         RegKey,
@@ -64,37 +62,49 @@ pub fn migrate_login_entry(app: &AppHandle, settings: &AppSettings) -> AppResult
         Err(error) => return Err(error.into()),
     };
     let executable = std::env::current_exe()?;
+    let existing: Option<String> = key.get_value("Serylane").ok();
+    if existing
+        .as_deref()
+        .is_some_and(|command| !owns_legacy_entry(command, &executable))
+    {
+        return Ok(());
+    }
+    // auto-launch 0.5 wrote unquoted paths. Normalize only an existing owned
+    // entry; do not create or enable a missing OS registration here.
+    if existing.is_some() {
+        key.set_value("Serylane", &quoted_login_command(&executable))?;
+    }
     let legacy: Option<String> = key.get_value("RouteDeck").ok();
     if legacy
         .as_deref()
         .is_some_and(|value| owns_legacy_entry(value, &executable))
     {
-        let existing: Option<String> = key.get_value("Serylane").ok();
-        if existing
-            .as_deref()
-            .is_some_and(|command| !owns_legacy_entry(command, &executable))
-        {
-            return Ok(());
-        }
         if settings.launch_at_login {
             let approvals = RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(
                 r"Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run",
                 KEY_READ | KEY_SET_VALUE,
             );
             match approvals {
-                Ok(approvals) => match approvals.get_raw_value("RouteDeck") {
-                    Ok(value) => {
-                        approvals.set_raw_value("Serylane", &value)?;
+                Ok(approvals) => {
+                    // Keep an existing new-name approval untouched. Otherwise
+                    // copy the old disabled/enabled bytes without calling
+                    // auto-launch.enable(), which would reset them to enabled.
+                    match approvals.get_raw_value("Serylane") {
+                        Ok(_) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                            match approvals.get_raw_value("RouteDeck") {
+                                Ok(value) => approvals.set_raw_value("Serylane", &value)?,
+                                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                                Err(error) => return Err(error.into()),
+                            }
+                        }
+                        Err(error) => return Err(error.into()),
                     }
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                    Err(error) => return Err(error.into()),
-                },
+                }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error.into()),
             }
-            app.autolaunch()
-                .enable()
-                .map_err(|e| crate::error::AppError::Platform(e.to_string()))?;
+            key.set_value("Serylane", &quoted_login_command(&executable))?;
         }
         key.delete_value("RouteDeck")?;
     }
@@ -107,14 +117,29 @@ pub fn migrate_login_entry(_app: &AppHandle, _settings: &AppSettings) -> AppResu
 }
 
 #[cfg(any(windows, test))]
+fn quoted_login_command(executable: &std::path::Path) -> String {
+    format!("\"{}\" {AUTOSTART_ARG}", executable.display())
+}
+
+#[cfg(any(windows, test))]
 fn owns_legacy_entry(command: &str, executable: &std::path::Path) -> bool {
     let Some(directory) = executable.parent() else {
         return false;
     };
     ["routedeck.exe", "serylane.exe"].iter().any(|name| {
-        let expected = format!("\"{}\"", directory.join(name).display());
-        command.eq_ignore_ascii_case(&expected)
-            || command.eq_ignore_ascii_case(&format!("{expected} {AUTOSTART_ARG}"))
+        let path = directory.join(name).display().to_string();
+        // Exact serializations used by our current and legacy autostart
+        // dependencies, including the old no-argument trailing space. Never
+        // accept prefixes, arbitrary arguments or another installation.
+        [
+            format!("\"{path}\""),
+            format!("\"{path}\" {AUTOSTART_ARG}"),
+            path.clone(),
+            format!("{path} "),
+            format!("{path} {AUTOSTART_ARG}"),
+        ]
+        .iter()
+        .any(|expected| command.eq_ignore_ascii_case(expected))
     })
 }
 
@@ -163,5 +188,27 @@ mod tests {
             &format!("{current_command} extra"),
             &current
         ));
+    }
+    #[test]
+    fn old_unquoted_login_paths_with_spaces_are_normalized_without_extra_arguments() {
+        let directory = std::path::Path::new("fixture").join("Program Files");
+        let current = directory.join("serylane.exe");
+        let old = directory.join("routedeck.exe").display().to_string();
+        for command in [&old, &format!("{old} "), &format!("{old} {AUTOSTART_ARG}")] {
+            assert!(owns_legacy_entry(command, &current));
+        }
+        assert_eq!(
+            quoted_login_command(&current),
+            format!("\"{}\" --autostart", current.display())
+        );
+        assert!(!owns_legacy_entry(
+            &format!("{old}.other --autostart"),
+            &current
+        ));
+        assert!(!owns_legacy_entry(
+            &format!("{old} --autostart extra"),
+            &current
+        ));
+        assert!(!owns_legacy_entry(&format!("{old} --other"), &current));
     }
 }

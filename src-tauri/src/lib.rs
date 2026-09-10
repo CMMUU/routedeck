@@ -210,9 +210,7 @@ fn update_settings(
     let settings = settings.merge_secret(&current);
     // Saving restoration or appearance preferences is not consent to rewrite
     // the user's OS login registration. Only an actual checkbox change is.
-    if settings.launch_at_login != current.launch_at_login
-        || (settings.launch_at_login && settings.silent_startup != current.silent_startup)
-    {
+    if settings.launch_at_login != current.launch_at_login {
         let autostart = app.autolaunch();
         if settings.launch_at_login {
             autostart

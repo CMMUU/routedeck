@@ -28,6 +28,9 @@ on disposable GitHub-hosted Windows x64/ARM64 machines. It checks NSIS and MSI
 fresh installation, same-directory upgrade from checksum-verified 0.7.6,
 settings/shortcut preservation, owned login-entry migration, quiet `--autostart`
 versus visible manual launch, unchanged stopped-state proxy and uninstall.
+Fixtures include installation paths with spaces, the legacy dependency's
+unquoted startup commands, and Task Manager-disabled startup approvals. Migration
+normalizes owned command quoting without resetting those approvals.
 The script refuses to run outside the fixed repository's hosted runners or
 when pre-existing application data/login entries are present. It does not
 perform a physical reboot or claim live TUN/model-stream acceptance.
