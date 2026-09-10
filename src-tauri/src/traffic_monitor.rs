@@ -778,7 +778,12 @@ mod tests {
         let mut rgba = vec![0_u8; 128 * 128 * 4];
         super::draw_brand_mark(&mut rgba, 128, 128, 0, 0, 128);
         let mut visible = 0;
-        for (rendered, source) in rgba.chunks_exact(4).zip(icon.rgba().chunks_exact(4)) {
+        for (rendered, source) in rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(icon.rgba().as_chunks::<4>().0)
+        {
             assert_eq!(rendered[3], source[3]);
             if source[3] > 0 {
                 visible += 1;
