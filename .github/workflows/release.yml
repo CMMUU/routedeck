@@ -119,6 +119,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          shared-key: release-${{ matrix.artifact }}
+          cache-on-failure: true
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         run: |

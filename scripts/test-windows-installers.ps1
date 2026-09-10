@@ -16,7 +16,10 @@ if (Test-Path -LiteralPath $dataRoot) { throw 'Runner contains existing applicat
 $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
 $proxyKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings'
 function Read-Run([string]$name) {
-    Get-ItemPropertyValue -LiteralPath $runKey -Name $name -ErrorAction SilentlyContinue
+    if (!(Test-Path -LiteralPath $runKey)) { return $null }
+    # The registry provider throws a terminating exception for a missing value,
+    # even with SilentlyContinue. Missing startup entries are the expected case.
+    (Get-Item -LiteralPath $runKey).GetValue($name, $null)
 }
 if ((Read-Run 'Serylane') -or (Read-Run 'RouteDeck')) { throw 'Runner contains an existing login registration.' }
 function Proxy-Snapshot {
@@ -50,7 +53,13 @@ function Uninstall-Package([string]$file, [string]$directory) {
     } else {
         Run-Installer (Join-Path $resolved 'uninstall.exe') '/S'
     }
+    # NSIS can hand off to its temporary uninstaller process before exiting.
+    $deadline = [DateTime]::UtcNow.AddSeconds(30)
+    while ((Test-Path -LiteralPath (Join-Path $resolved 'serylane.exe')) -and [DateTime]::UtcNow -lt $deadline) {
+        Start-Sleep -Milliseconds 500
+    }
     if (Test-Path -LiteralPath (Join-Path $resolved 'serylane.exe')) { throw 'Uninstall left the main executable behind.' }
+    Start-Sleep -Seconds 1
 }
 function Write-Fixture([bool]$login) {
     New-Item -ItemType Directory -Path $dataRoot -Force | Out-Null
