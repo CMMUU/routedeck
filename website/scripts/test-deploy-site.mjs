@@ -2,7 +2,22 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { retryRead, uploadedVersion, verifyStatic } from './deploy-site.mjs';
+import { retryRead, sourceAssetBytes, uploadedVersion, verifyStatic } from './deploy-site.mjs';
+
+test('robots verification preserves Cloudflare managed policy and checks the full source portion', async () => {
+  const owned = 'User-agent: *\nAllow: /\n\nSitemap: https://serylane.cmmuu.com/sitemap.xml\n';
+  const prefix = '# As a condition of accessing this website, you agree\n\n# BEGIN Cloudflare Managed content\nUser-agent: GPTBot\nDisallow: /\n\n# END Cloudflare Managed Content\n\n';
+  const bytes = Buffer.from(prefix + owned);
+  assert.equal(sourceAssetBytes('/robots.txt', bytes).toString(), owned);
+  assert.equal(sourceAssetBytes('/site.js', bytes), bytes);
+  assert.equal(sourceAssetBytes('/robots.txt', Buffer.from(owned)).toString(), owned);
+  assert.throws(() => sourceAssetBytes('/robots.txt', Buffer.from(prefix + prefix + owned)));
+  const expected = {files:{'/robots.txt':createHash('sha256').update(owned).digest('hex')}};
+  const fetcher = body => async url => url.endsWith('/build-info.json')
+    ? Response.json(expected, {headers:{'cache-control':'no-store'}}) : new Response(body);
+  await verifyStatic(expected, fetcher(prefix + owned));
+  await assert.rejects(verifyStatic(expected, fetcher(prefix + owned.replace('Allow: /', 'Disallow: /'))));
+});
 
 test('edge propagation checks retry only reads and remain bounded', async () => {
   let reads = 0, waits = 0;

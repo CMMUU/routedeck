@@ -20,6 +20,21 @@ export function uploadedVersion(output) {
   return matches[0][1];
 }
 
+export function sourceAssetBytes(path, bytes) {
+  if (path !== '/robots.txt') return bytes;
+  // Cloudflare's existing managed robots policy prepends its own section.
+  // Keep that policy enabled; compare our complete original file after it.
+  const content = bytes.toString('utf8');
+  const start = '# BEGIN Cloudflare Managed content\n';
+  const end = '# END Cloudflare Managed Content\n\n';
+  if (!content.includes(start)) return bytes;
+  assert.ok(content.startsWith('# As a condition of accessing this website,'), 'Unexpected robots prefix');
+  assert.equal(content.split(start).length, 2, 'Ambiguous managed robots start');
+  assert.equal(content.split(end).length, 2, 'Ambiguous managed robots end');
+  assert.ok(content.indexOf(end) > content.indexOf(start));
+  return Buffer.from(content.slice(content.indexOf(end) + end.length));
+}
+
 async function request(url, options = {}) {
   return fetch(url, { redirect: 'manual', cache: 'no-store', signal: AbortSignal.timeout(30000), ...options });
 }
@@ -38,7 +53,7 @@ export async function verifyStatic(expected, fetcher = request) {
   for (const [path, hash] of Object.entries(expected.files)) {
     const response = await fetcher(origin + path);
     assert.equal(response.status, 200, `Live page unavailable: ${path}`);
-    assert.equal(sha256(Buffer.from(await response.arrayBuffer())), hash, `Live content differs: ${path}`);
+    assert.equal(sha256(sourceAssetBytes(path, Buffer.from(await response.arrayBuffer()))), hash, `Live content differs: ${path}`);
   }
 }
 async function verifyDownloads() {
