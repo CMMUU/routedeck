@@ -59,12 +59,15 @@ async function verifyDownloads() {
   }
   console.log(`Verified latest release ${release.version}, all six architecture-specific download routes.`);
 }
-async function retryRead(check) {
-  for (let attempt = 1; attempt <= 3; attempt++) {
+export async function retryRead(check, wait = () => new Promise(resolve => setTimeout(resolve, 15000))) {
+  // Edge activation can briefly return the previous asset manifest. Retry only
+  // reads for up to 75 seconds; never repeat an upload or deployment write.
+  const attempts = 6;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
     try { return await check(); } catch (error) {
-      if (attempt === 3) throw error;
-      console.log(`Live verification not ready; retry ${attempt}/2.`);
-      await new Promise(resolve => setTimeout(resolve, 5000));
+      if (attempt === attempts) throw error;
+      console.log(`Live verification not ready; retry ${attempt}/${attempts - 1}.`);
+      await wait();
     }
   }
 }

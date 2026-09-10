@@ -2,7 +2,22 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { test } from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { uploadedVersion, verifyStatic } from './deploy-site.mjs';
+import { retryRead, uploadedVersion, verifyStatic } from './deploy-site.mjs';
+
+test('edge propagation checks retry only reads and remain bounded', async () => {
+  let reads = 0, waits = 0;
+  const result = await retryRead(async () => {
+    if (++reads < 4) throw new Error('Previous edge manifest');
+    return 'verified';
+  }, async () => { waits++; });
+  assert.equal(result, 'verified');
+  assert.equal(reads, 4);
+  assert.equal(waits, 3);
+  reads = 0; waits = 0;
+  await assert.rejects(retryRead(async () => { reads++; throw new Error('Still unavailable'); }, async () => { waits++; }));
+  assert.equal(reads, 6);
+  assert.equal(waits, 5);
+});
 test('CI invokes the deployment script, not pnpm workspace deploy', async () => {
   const workflow = await readFile(new URL('../../.github/workflows/website.yml', import.meta.url), 'utf8');
   assert.match(workflow, /run: pnpm run deploy/);
