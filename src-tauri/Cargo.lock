@@ -3690,7 +3690,7 @@ dependencies = [
 
 [[package]]
 name = "serylane"
-version = "0.7.8"
+version = "0.7.9"
 dependencies = [
  "block2",
  "bytes",
@@ -3702,6 +3702,8 @@ dependencies = [
  "hyper-util",
  "libc",
  "objc2",
+ "objc2-app-kit",
+ "objc2-foundation",
  "rand 0.9.5",
  "regex",
  "reqwest 0.12.28",

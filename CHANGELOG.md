@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.9 - 2026-09-11
+
+- Render macOS two-row traffic rates as native attributed text with 9.5pt medium tabular digits, smaller arrows/units, fixed columns and a stable status-item width.
+- Keep the application S artwork as a separate template icon; preserve existing menus, clicks, system appearance and the bitmap fallback paths.
+- Center both rows using the real status-button geometry, clear native text and fixed width when traffic display is disabled, and keep explicit binary rate units in tooltips.
+- Handle rounded unit boundaries and very large rates without truncation; cover native 1x/2x rendering, light/dark/selected appearance, shared branding and disable/re-enable regressions.
+- Synchronize application notes, website documentation, GitHub and Gitee through the existing verified release pipeline.
+
 ## 0.7.8 - 2026-09-11
 
 - Replace the three startup toggles with explicit startup modes while preserving existing preferences and the last successful running/stopped intent.

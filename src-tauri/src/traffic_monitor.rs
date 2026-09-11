@@ -9,6 +9,9 @@ use sysinfo::Networks;
 use tauri::{AppHandle, Emitter};
 
 #[cfg(target_os = "macos")]
+mod macos_title;
+
+#[cfg(target_os = "macos")]
 use std::sync::OnceLock;
 
 pub const TRAFFIC_EVENT: &str = "global-traffic";
@@ -216,6 +219,16 @@ fn update_tray_if_changed(
     snapshot: &GlobalTrafficSnapshot,
     last_key: &mut String,
 ) {
+    #[cfg(target_os = "macos")]
+    let key = format!(
+        "{}:{}",
+        snapshot.enabled,
+        macos_title::display_key(
+            snapshot.upload_bytes_per_second,
+            snapshot.download_bytes_per_second
+        )
+    );
+    #[cfg(not(target_os = "macos"))]
     let key = format!(
         "{}:{}:{}",
         snapshot.enabled,
@@ -235,7 +248,13 @@ fn update_tray(app: &AppHandle, snapshot: &GlobalTrafficSnapshot) {
         return;
     };
     if !snapshot.enabled {
-        let _ = tray.set_title::<&str>(None);
+        // tray-icon 0.24's macOS None setter leaves the previous native title
+        // intact. An empty string explicitly removes both rows.
+        let _ = tray.set_title(Some(""));
+        #[cfg(target_os = "macos")]
+        if let Err(error) = macos_title::clear(&tray) {
+            eprintln!("global traffic native tray reset failed: {error}");
+        }
         if let Some(icon) = app.default_window_icon() {
             let _ = tray.set_icon_with_as_template(Some(icon.clone()), false);
         }
@@ -246,11 +265,27 @@ fn update_tray(app: &AppHandle, snapshot: &GlobalTrafficSnapshot) {
     let upload = format_tray_rate(snapshot.upload_bytes_per_second);
     let download = format_tray_rate(snapshot.download_bytes_per_second);
     let tooltip = format!("Serylane\n↑ {upload}\n↓ {download}");
-    let _ = tray.set_tooltip(Some(tooltip));
 
     #[cfg(target_os = "macos")]
     {
-        let _ = tray.set_title::<&str>(None);
+        // Only the shared S mark remains an image. Numbers use AppKit text at
+        // its real point size, independently of tray-icon's 18pt image scaling.
+        let native = tray
+            .set_icon_with_as_template(Some(native_macos_brand_icon()), true)
+            .map_err(|error| error.to_string())
+            .and_then(|()| {
+                macos_title::update(
+                    &tray,
+                    snapshot.upload_bytes_per_second,
+                    snapshot.download_bytes_per_second,
+                )
+            });
+        match native {
+            Ok(()) => return,
+            Err(error) => eprintln!("global traffic native tray fallback: {error}"),
+        }
+        let _ = tray.set_title(Some(""));
+        let _ = macos_title::clear(&tray);
         let (icon, is_template) = render_macos_tray_icon(&upload, &download);
         if let Err(error) = tray.set_icon_with_as_template(Some(icon), is_template) {
             eprintln!("global traffic tray icon update failed: {error}");
@@ -261,6 +296,19 @@ fn update_tray(app: &AppHandle, snapshot: &GlobalTrafficSnapshot) {
     {
         let _ = tray.set_title(Some(format!("↑ {upload}\n↓ {download}")));
     }
+    let _ = tray.set_tooltip(Some(tooltip));
+}
+
+#[cfg(target_os = "macos")]
+fn native_macos_brand_icon() -> tauri::image::Image<'static> {
+    static ICON: OnceLock<tauri::image::Image<'static>> = OnceLock::new();
+    ICON.get_or_init(|| {
+        // 18pt image at 2x, with the original S occupying 16pt.
+        let mut rgba = vec![0_u8; 36 * 36 * 4];
+        draw_brand_mark(&mut rgba, 36, 36, 2, 2, 32);
+        tauri::image::Image::new_owned(rgba, 36, 36)
+    })
+    .clone()
 }
 
 fn format_tray_rate(bytes_per_second: u64) -> String {
@@ -798,15 +846,27 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn normal_and_fallback_trays_both_use_the_shared_s_mark() {
+    fn native_and_fallback_trays_use_the_shared_s_mark() {
+        let native = super::native_macos_brand_icon();
         let fallback = super::render_pixel_macos_tray_icon("1.2M/s", "8.3K/s");
         let font = super::macos_status_font().expect("macOS system status font");
         let normal = super::render_monochrome_macos_tray_icon(font, "1.2M/s", "8.3K/s");
-        for (image, size, top) in [(&normal, 56, 4), (&fallback, 24, 4)] {
+        for (image, size, left, top) in [
+            (&native, 32, 2, 2),
+            (&normal, 56, 0, 4),
+            (&fallback, 24, 0, 4),
+        ] {
             let mut expected = vec![0_u8; (image.width() * image.height() * 4) as usize];
-            super::draw_brand_mark(&mut expected, image.width(), image.height(), 0, top, size);
+            super::draw_brand_mark(
+                &mut expected,
+                image.width(),
+                image.height(),
+                left,
+                top,
+                size,
+            );
             for y in top..top + size {
-                for x in 0..size {
+                for x in left..left + size {
                     let alpha = ((y * image.width() + x) * 4 + 3) as usize;
                     assert_eq!(image.rgba()[alpha], expected[alpha]);
                 }
@@ -817,7 +877,11 @@ mod tests {
         if let Some(folder) = std::env::var_os("SERYLANE_TRAY_SNAPSHOT_DIR") {
             let folder = std::path::PathBuf::from(folder);
             std::fs::create_dir_all(&folder).unwrap();
-            for (name, image) in [("normal", normal), ("fallback", fallback)] {
+            for (name, image) in [
+                ("native-mark", native),
+                ("normal", normal),
+                ("fallback", fallback),
+            ] {
                 std::fs::write(folder.join(format!("{name}.rgba")), image.rgba()).unwrap();
                 std::fs::write(
                     folder.join(format!("{name}.json")),

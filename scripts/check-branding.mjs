@@ -90,6 +90,8 @@ assert.ok(tray.includes('tauri::include_image!("icons/128x128.png")'));
 assert.doesNotMatch(tray, /draw_m_mark|const M_X|const M_Y/);
 assert.equal((tray.match(/draw_brand_mark\(&mut rgba, width, HEIGHT,/g) ?? []).length, 2,
   "Both macOS rate renderers must use the shared app mark");
+assert.match(tray, /draw_brand_mark\(&mut rgba, 36, 36, 2, 2, 32\)/,
+  "Native macOS title must retain the shared S mark as its separate template icon");
 assert.deepEqual(readFileSync(join(root, "src-tauri/icons/128x128.png")),
   readFileSync(join(root, "assets/brand/app-icon-128.png")), "Sidebar and tray must use identical app artwork");
 const updater = read("src-tauri/src/app_update.rs");

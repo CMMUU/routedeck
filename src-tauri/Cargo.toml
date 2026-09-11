@@ -1,6 +1,6 @@
 [package]
 name = "serylane"
-version = "0.7.8"
+version = "0.7.9"
 license = "GPL-3.0-only"
 description = "Serylane: lightweight cross-platform Mihomo desktop client"
 authors = ["cmmuu"]
@@ -20,7 +20,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+# The native tray bridge uses the public inner-tray API from Tauri 2.11.
+tauri = { version = "~2.11", features = ["tray-icon"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
@@ -61,3 +62,13 @@ fontdue = "0.9.4"
 block2 = "0.6"
 libc = "0.2"
 objc2 = "0.6"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["std", "NSAttributedString", "NSButton", "NSCell", "NSControl", "NSFont", "NSFontDescriptor", "NSParagraphStyle", "NSStatusBar", "NSStatusBarButton", "NSStatusItem", "NSText", "NSView", "objc2-core-foundation"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "NSArray", "NSAttributedString", "NSDictionary", "NSGeometry", "NSRange", "NSString", "NSValue"] }
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSAppearance", "NSApplication", "NSBitmapImageRep", "NSImage", "NSImageRep", "NSStringDrawing"] }
+
+[[test]]
+name = "macos_tray_native"
+path = "tests/macos_tray_native.rs"
+harness = false

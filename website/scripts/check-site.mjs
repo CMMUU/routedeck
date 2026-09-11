@@ -59,6 +59,8 @@ for (const [route, html] of htmls) {
     checkedLinks++;
   }
 }
+assert.match(htmls.get('/docs/'), /v0\.7\.9：更清晰的 macOS 双行网速/);
+assert.match(htmls.get('/'), /macOS 原生双行网速/);
 const sitemap = await readFile(join(root, 'sitemap.xml'), 'utf8');
 for (const route of htmls.keys()) if (route !== '/404') assert.ok(sitemap.includes(`<loc>${origin}${route}</loc>`), `Sitemap omits ${route}`);
 assert.ok(!(sitemap.includes('/404')));
