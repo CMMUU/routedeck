@@ -75,3 +75,12 @@ jobs:
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml
+        env:
+          SERYLANE_NATIVE_TRAY_SNAPSHOT_DIR: ${{ runner.temp }}/native-tray
+      - name: Retain native tray rendering evidence
+        if: always() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-tray-${{ matrix.os }}
+          path: ${{ runner.temp }}/native-tray
+          if-no-files-found: warn

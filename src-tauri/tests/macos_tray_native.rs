@@ -151,7 +151,7 @@ fn main() {
                     .enumerate()
                     .filter(|(y, ink)| **ink && (*y == 0 || !rows[y - 1]))
                     .count();
-                if runs != 2 {
+                if runs != 2 || rows[0] || rows[rows.len() - 1] {
                     println!(
                         "ink rows {name} {scale}x: {:?}",
                         rows.iter()
@@ -159,6 +159,12 @@ fn main() {
                             .filter(|(_, ink)| **ink)
                             .map(|(y, _)| y)
                             .collect::<Vec<_>>()
+                    );
+                    println!(
+                        "native geometry: flipped={}, imageRect={:?}, titleRect={:?}",
+                        button.isFlipped(),
+                        button.cell().unwrap().imageRectForBounds(rect),
+                        button.cell().unwrap().titleRectForBounds(rect)
                     );
                 }
                 assert_eq!(

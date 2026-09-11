@@ -160,6 +160,17 @@ jobs:
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml
+        env:
+          SERYLANE_NATIVE_TRAY_SNAPSHOT_DIR: ${{ runner.temp }}/native-tray
+      - name: Retain failed native tray rendering evidence
+        if: failure() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          # Failed runs never reach publish. Successful runs retain exactly
+          # the six installer artifacts consumed by the release publisher.
+          name: failed-native-tray-${{ matrix.artifact }}
+          path: ${{ runner.temp }}/native-tray
+          if-no-files-found: warn
       - name: Build signed installers and updater artifacts
         id: signed_build
         env:
