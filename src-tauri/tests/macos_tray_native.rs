@@ -143,8 +143,23 @@ fn main() {
                 .unwrap();
             }
             if !highlighted {
-                let text_x =
-                    button.cell().unwrap().titleRectForBounds(rect).origin.x as isize * scale;
+                let title_rect = button.cell().unwrap().titleRectForBounds(rect);
+                let intrinsic_width = macos_title::build_title(5939, 6451)
+                    .boundingRectWithSize_options_context(
+                        NSSize::new(48.0, 100.0),
+                        NSStringDrawingOptions::UsesLineFragmentOrigin,
+                        None,
+                    )
+                    .size
+                    .width;
+                // macOS 14 reports an expanded 60pt title rectangle for the
+                // centered 42pt text. Scanning its raw left edge includes the
+                // right half of S, falsely joining the two text ink bands.
+                // macOS 15/current return the intrinsic rectangle already.
+                let text_x = ((title_rect.origin.x
+                    + (title_rect.size.width - intrinsic_width).max(0.0) / 2.0)
+                    * scale as f64)
+                    .ceil() as isize;
                 let rows: Vec<bool> = (0..bitmap.pixelsHigh())
                     .map(|y| {
                         (text_x..bitmap.pixelsWide())
