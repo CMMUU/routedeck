@@ -14,6 +14,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urljoin, urlsplit
@@ -36,6 +37,7 @@ MAX_JSON, MAX_ASSET = 8 * 1024 * 1024, 512 * 1024 * 1024
 GE_MAX_ASSET, GE_MAX_TOTAL = 100 * 1024 * 1024, 1_000_000_000
 STABLE_TAG = r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
 READ_ATTEMPTS = 3
+UPLOAD_TIMEOUT = 600
 TRANSIENT_HTTP = {408, 429, 500, 502, 503, 504}
 GH_STORAGE = {"release-assets.githubusercontent.com", "objects.githubusercontent.com", "github-releases.githubusercontent.com"}
 GE_STORAGE = {"foruda.gitee.com"}
@@ -305,35 +307,60 @@ class Api:
                 part.unlink()
 
     def upload(self, path, file):
-        if self.service != "gitee" or "?" in path:
+        if self.service != "gitee" or not re.fullmatch(
+                rf"/repos/{GE_OWNER}/(?:{'|'.join(sorted(REPOS))})/releases/[1-9]\d*/attach_files", path):
             raise SyncError("Uploads are restricted to the Gitee API")
+        if not isinstance(self.token, str) or not self.token or any(c in self.token for c in "\r\n\0"):
+            raise SyncError("Invalid Gitee upload credential")
         file = Path(file)
         name = safe_name(file.name)
-        boundary = "gitee-sync-" + uuid.uuid4().hex
-        start = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"access_token\"\r\n\r\n".encode()
-                 + self.token.encode() + f"\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{name}\"\r\nContent-Type: application/octet-stream\r\n\r\n".encode())
-        end = f"\r\n--{boundary}--\r\n".encode()
-        conn = http.client.HTTPSConnection("gitee.com", timeout=180)
+        if not file.is_file() or file.stat().st_size > MAX_ASSET:
+            raise SyncError("Invalid Gitee upload file")
+        # curl streams multipart files and handles early HTTP responses while
+        # sending. A blocking HTTPSConnection.send loop cannot read such a
+        # response until the entire file has been sent, and its socket timeout
+        # is not a total transfer deadline. Keep credentials in stdin config,
+        # never argv, URLs, source, logs or public diagnostic artifacts.
+        def quote(value):
+            value = str(value).replace('\\', '\\\\').replace('"', '\\"')
+            return '"' + value.replace('\n', '\\n').replace('\r', '\\r') + '"'
         try:
-            conn.putrequest("POST", "/api/v5" + path)
-            conn.putheader("Content-Type", "multipart/form-data; boundary=" + boundary)
-            conn.putheader("Content-Length", str(len(start) + file.stat().st_size + len(end)))
-            conn.putheader("User-Agent", "CMMUU-Gitee-Sync/1")
-            conn.endheaders()
-            conn.send(start)
-            with file.open("rb") as stream:
-                for block in iter(lambda: stream.read(1024 * 1024), b""):
-                    conn.send(block)
-            conn.send(end)
-            response = conn.getresponse()
-            raw = response.read(MAX_JSON + 1)
-            if response.status != 201 or len(raw) > MAX_JSON:
-                raise SyncError(f"Gitee upload returned HTTP {response.status}; do not blindly retry POST")
-            return json.loads(raw)
-        except (OSError, ValueError, http.client.HTTPException):
+            with tempfile.TemporaryDirectory(prefix="gitee-upload-") as temporary:
+                response_file = Path(temporary) / "response.json"
+                response_file.touch(mode=0o600)
+                # Quote both the curl config value and the multipart filename.
+                # The payload path is absolute and owned by the verified cache.
+                multipart = f'file=@{quote(file.resolve())};filename={quote(name)};type=application/octet-stream'
+                options = [
+                    ("url", GE_API + path), ("proto", "=https"),
+                    ("connect-timeout", 30), ("max-time", UPLOAD_TIMEOUT),
+                    ("max-filesize", MAX_JSON), ("expect100-timeout", 2),
+                    ("user-agent", "CMMUU-Gitee-Sync/1"),
+                    ("header", "Accept: application/json"),
+                    ("header", "Authorization: Bearer " + self.token),
+                    ("form-string", "access_token=" + self.token),
+                    ("form", multipart), ("output", response_file),
+                    ("write-out", "%{http_code} %{size_upload} %{speed_upload} %{time_total}"),
+                ]
+                config = "http1.1\nsilent\nshow-error\n" + "".join(f"{key} = {quote(value)}\n" for key, value in options)
+                # --disable is first: no user curlrc may add redirects, retries,
+                # insecure TLS or alternate endpoints. No -L or --retry here.
+                result = subprocess.run(["curl", "--disable", "--config", "-"], input=config,
+                                        text=True, capture_output=True, timeout=UPLOAD_TIMEOUT + 30)
+                metrics = re.fullmatch(r"(\d{3}) (\d+) ([\d.]+) ([\d.]+)\s*", result.stdout)
+                if metrics:
+                    status, sent, speed, elapsed = metrics.groups()
+                    print(f"Gitee upload transport: {name}, HTTP {status}, {sent} bytes, {elapsed}s, {speed} bytes/s", flush=True)
+                if result.returncode or not metrics:
+                    raise SyncError(f"Gitee upload transport exited {result.returncode}; outcome is uncertain, inspect existing attachments before retry")
+                if int(metrics[1]) != 201 or response_file.stat().st_size > MAX_JSON:
+                    raise SyncError(f"Gitee upload returned HTTP {metrics[1]}; do not blindly retry POST")
+                response = json.loads(response_file.read_bytes())
+                if not isinstance(response, dict):
+                    raise SyncError("Invalid Gitee upload response")
+                return response
+        except (OSError, ValueError, subprocess.TimeoutExpired):
             raise SyncError("Gitee upload outcome is uncertain; rerun to inspect existing attachments") from None
-        finally:
-            conn.close()
 
 
 def verify_manifest(files):

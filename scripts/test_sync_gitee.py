@@ -631,5 +631,90 @@ class SyncTests(unittest.TestCase):
                 self.assertEqual(ge.writes, [])
 
 
+class CurlUploadTests(unittest.TestCase):
+    endpoint = "/repos/cmmuu/serylane/releases/7/attach_files"
+    credential = "offline-upload-credential"
+
+    def fixture(self):
+        temporary = tempfile.TemporaryDirectory(prefix="offline-upload-", dir=HERE)
+        self.addCleanup(temporary.cleanup)
+        payload = Path(temporary.name) / "package with;space.zip"
+        payload.write_bytes(b"verified archive fixture")
+        return payload
+
+    def response_runner(self, status=201, body=b'{"id":7}', returncode=0, syntax=False):
+        original_run = sync.subprocess.run
+
+        def run(command, **kwargs):
+            self.assertEqual(command, ["curl", "--disable", "--config", "-"])
+            self.assertNotIn(self.credential, repr(command))
+            config = kwargs["input"]
+            options = dict((key, json.loads(value)) for key, value in
+                           (line.split(" = ", 1) for line in config.splitlines() if " = " in line))
+            self.assertEqual(options["url"], sync.GE_API + self.endpoint)
+            self.assertNotIn(self.credential, options["url"])
+            self.assertEqual(options["header"], "Authorization: Bearer " + self.credential)
+            self.assertEqual(options["form-string"], "access_token=" + self.credential)
+            self.assertIn('filename="package with;space.zip"', options["form"])
+            self.assertEqual(options["proto"], "=https")
+            self.assertEqual(options["max-time"], str(sync.UPLOAD_TIMEOUT))
+            self.assertEqual(kwargs["timeout"], sync.UPLOAD_TIMEOUT + 30)
+            for forbidden in ("location", "retry", "insecure", "verbose", "trace"):
+                self.assertNotIn(forbidden, options)
+            response = Path(options["output"])
+            self.assertEqual(response.stat().st_mode & 0o777, 0o600)
+            if syntax:
+                # --version parses the real config but performs no request.
+                parsed = original_run(command + ["--version"], input=config, text=True,
+                                      capture_output=True, timeout=10)
+                self.assertEqual(parsed.returncode, 0, parsed.stderr)
+            response.write_bytes(body)
+            return SimpleNamespace(returncode=returncode, stdout=f"{status:03d} 1234 5000 0.25",
+                                   stderr="not logged " + self.credential)
+        return run
+
+    def test_streaming_curl_config_is_valid_and_keeps_credentials_out_of_argv_and_urls(self):
+        payload = self.fixture()
+        with patch.object(sync.subprocess, "run", side_effect=self.response_runner(syntax=True)) as run:
+            self.assertEqual(sync.Api("gitee", self.credential).upload(self.endpoint, payload), {"id": 7})
+        self.assertEqual(run.call_count, 1)
+
+    def test_redirect_http_error_and_transport_error_never_retry_or_expose_response(self):
+        payload = self.fixture()
+        for status, code in [(302, 0), (403, 0), (413, 0), (0, 28)]:
+            with self.subTest(status=status), patch.object(sync.subprocess, "run", side_effect=
+                    self.response_runner(status, self.credential.encode(), code)) as run:
+                with self.assertRaises(sync.SyncError) as raised:
+                    sync.Api("gitee", self.credential).upload(self.endpoint, payload)
+                self.assertNotIn(self.credential, str(raised.exception))
+                self.assertEqual(run.call_count, 1)
+
+    def test_timeout_bad_json_and_oversized_response_are_bounded(self):
+        payload = self.fixture()
+        timeout = sync.subprocess.TimeoutExpired("private " + self.credential, 630)
+        with patch.object(sync.subprocess, "run", side_effect=timeout) as run:
+            with self.assertRaises(sync.SyncError) as raised:
+                sync.Api("gitee", self.credential).upload(self.endpoint, payload)
+            self.assertNotIn(self.credential, str(raised.exception))
+            self.assertEqual(run.call_count, 1)
+        for body in [b'not json', b'[]', b' ' * (sync.MAX_JSON + 1)]:
+            with self.subTest(size=len(body)), patch.object(sync.subprocess, "run", side_effect=self.response_runner(body=body)):
+                with self.assertRaises(sync.SyncError):
+                    sync.Api("gitee", self.credential).upload(self.endpoint, payload)
+
+    def test_upload_scope_and_header_credentials_fail_closed(self):
+        payload = self.fixture()
+        for service, path, credential in [
+            ("github", self.endpoint, self.credential),
+            ("gitee", "/repos/cmmuu/other/releases/7/attach_files", self.credential),
+            ("gitee", self.endpoint + "?access_token=other", self.credential),
+            ("gitee", self.endpoint, "injected\r\nHeader: value"),
+        ]:
+            with self.subTest(service=service, path=path), patch.object(sync.subprocess, "run") as run:
+                with self.assertRaises(sync.SyncError):
+                    sync.Api(service, credential).upload(path, payload)
+                run.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()
