@@ -219,6 +219,9 @@ jobs:
           node --test scripts/test-create-release-tag.mjs
       - uses: actions/download-artifact@v4
         with:
+          # A rerun can retain failure screenshots from its earlier attempt.
+          # Only the six platform package directories enter signed publishing.
+          pattern: '{macos,windows,linux}-*'
           path: ${{ runner.temp }}/release-artifacts
       - name: Create immutable version tag after every platform passed
         if: needs.source.outputs.create_tag == 'true'

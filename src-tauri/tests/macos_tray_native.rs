@@ -120,6 +120,13 @@ fn main() {
                 )
             }.unwrap();
             bitmap.setSize(rect.size);
+            // NSBitmapImageRep owns uninitialized storage. cacheDisplay uses
+            // compositing and does not clear it (verified with a nonzero
+            // control canvas). Clear every plane before checking edge ink;
+            // otherwise allocator residue looks like clipping on macOS 14/15.
+            unsafe {
+                std::ptr::write_bytes(bitmap.bitmapData(), 0, bitmap.bytesPerPlane() as usize);
+            }
             button.cacheDisplayInRect_toBitmapImageRep(rect, &bitmap);
             if let Some(folder) = &folder {
                 let png = unsafe {
