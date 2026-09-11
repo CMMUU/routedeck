@@ -37,7 +37,7 @@ MAX_JSON, MAX_ASSET = 8 * 1024 * 1024, 512 * 1024 * 1024
 GE_MAX_ASSET, GE_MAX_TOTAL = 100 * 1024 * 1024, 1_000_000_000
 STABLE_TAG = r"v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
 READ_ATTEMPTS = 3
-UPLOAD_TIMEOUT = 600
+UPLOAD_TIMEOUT = 1800
 TRANSIENT_HTTP = {408, 429, 500, 502, 503, 504}
 GH_STORAGE = {"release-assets.githubusercontent.com", "objects.githubusercontent.com", "github-releases.githubusercontent.com"}
 GE_STORAGE = {"foruda.gitee.com"}
@@ -334,6 +334,7 @@ class Api:
                 options = [
                     ("url", GE_API + path), ("proto", "=https"),
                     ("connect-timeout", 30), ("max-time", UPLOAD_TIMEOUT),
+                    ("speed-limit", 32768), ("speed-time", 120),
                     ("max-filesize", MAX_JSON), ("expect100-timeout", 2),
                     ("user-agent", "CMMUU-Gitee-Sync/1"),
                     ("header", "Accept: application/json"),
@@ -342,7 +343,7 @@ class Api:
                     ("form", multipart), ("output", response_file),
                     ("write-out", "%{http_code} %{size_upload} %{speed_upload} %{time_total}"),
                 ]
-                config = "http1.1\nsilent\nshow-error\n" + "".join(f"{key} = {quote(value)}\n" for key, value in options)
+                config = "silent\nshow-error\n" + "".join(f"{key} = {quote(value)}\n" for key, value in options)
                 # --disable is first: no user curlrc may add redirects, retries,
                 # insecure TLS or alternate endpoints. No -L or --retry here.
                 result = subprocess.run(["curl", "--disable", "--config", "-"], input=config,

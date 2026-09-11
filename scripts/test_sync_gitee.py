@@ -658,6 +658,9 @@ class CurlUploadTests(unittest.TestCase):
             self.assertIn('filename="package with;space.zip"', options["form"])
             self.assertEqual(options["proto"], "=https")
             self.assertEqual(options["max-time"], str(sync.UPLOAD_TIMEOUT))
+            self.assertEqual(options["speed-limit"], "32768")
+            self.assertEqual(options["speed-time"], "120")
+            self.assertNotIn("http1.1\n", config)
             self.assertEqual(kwargs["timeout"], sync.UPLOAD_TIMEOUT + 30)
             for forbidden in ("location", "retry", "insecure", "verbose", "trace"):
                 self.assertNotIn(forbidden, options)
