@@ -16,6 +16,7 @@ use objc2_foundation::{
 pub(super) const FONT_SIZE: f64 = 9.5;
 pub(super) const LINE_HEIGHT: f64 = 10.5;
 pub(super) const ITEM_WIDTH: f64 = 78.0;
+const OPTICAL_BASELINE_INSET: f64 = 1.5;
 const SMALL_FONT_SIZE: f64 = 8.0;
 const NUMBER_RIGHT: f64 = 32.0;
 const UNIT_LEFT: f64 = 34.0;
@@ -163,11 +164,16 @@ pub(super) fn apply_to_item(
     let rect = cell.titleRectForBounds(bounds);
     let displacement =
         rect.origin.y + rect.size.height / 2.0 - (bounds.origin.y + bounds.size.height / 2.0);
-    let offset = if button.isFlipped() {
+    let geometric_offset = if button.isFlipped() {
         displacement
     } else {
         -displacement
     };
+    // The typographic box includes unused descent below these digits/arrows.
+    // macOS 14/15's dark 2x rendering otherwise touches the top edge even when
+    // the 21pt box is centered. Move ink down 1.5pt, preserving both row baselines
+    // and a visible top/bottom inset on the old and current status-button cells.
+    let offset = geometric_offset - OPTICAL_BASELINE_INSET;
     unsafe {
         title.addAttribute_value_range(
             NSBaselineOffsetAttributeName,
