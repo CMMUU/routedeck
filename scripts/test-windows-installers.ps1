@@ -44,6 +44,26 @@ function Proxy-Snapshot {
     $fields | ConvertTo-Json -Compress
 }
 $proxyBefore = Proxy-Snapshot
+function Test-JournalReady([string]$path, [DateTime]$startedAt) {
+    # App logs are atomically replaced. Test-Path followed by Get-Item races
+    # with removal/rename; one metadata read treats a missing file as the .NET
+    # 1601 UTC sentinel while retaining real I/O errors and the startup deadline.
+    [IO.File]::GetLastWriteTimeUtc($path) -ge $startedAt.ToUniversalTime()
+}
+# Deterministic readiness regression checks, restricted by the runner guard
+# above and using only this invocation's disposable directory.
+$readinessProbe = Join-Path $testRoot 'readiness-probe.json'
+$readinessStart = [DateTime]::UtcNow.AddMinutes(-1)
+if (Test-JournalReady $readinessProbe $readinessStart) { throw 'A missing journal was considered ready.' }
+[IO.File]::WriteAllText($readinessProbe, 'readiness fixture')
+[IO.File]::SetLastWriteTimeUtc($readinessProbe, $readinessStart.AddMinutes(-1))
+if (Test-JournalReady $readinessProbe $readinessStart) { throw 'A stale journal was considered ready.' }
+[IO.File]::SetLastWriteTimeUtc($readinessProbe, $readinessStart.AddSeconds(1))
+if (!(Test-JournalReady $readinessProbe $readinessStart)) { throw 'A fresh journal was not considered ready.' }
+[IO.File]::Move($readinessProbe, "$readinessProbe.moved")
+if (Test-JournalReady $readinessProbe $readinessStart) { throw 'A journal replacement gap was considered ready.' }
+Remove-Item -LiteralPath "$readinessProbe.moved"
+Write-Host 'PASS: journal readiness handles missing, stale, fresh and replacement-gap states.'
 # Process.MainWindowHandle may select Tauri's tray/event-loop helper window.
 # Inspect the actual named application window, including hidden top-level windows.
 Add-Type -TypeDefinition @'
@@ -154,8 +174,7 @@ function Assert-Application([string]$executable, [bool]$login, [bool]$osDisabled
                 Start-Sleep -Milliseconds 500
                 $process.Refresh()
                 if ($process.HasExited) { throw 'Installed application exited during startup.' }
-                $ready = (Test-Path -LiteralPath $journal) -and
-                    ((Get-Item -LiteralPath $journal).LastWriteTimeUtc -ge $process.StartTime.ToUniversalTime())
+                $ready = Test-JournalReady $journal $process.StartTime
             } until ($ready -or [DateTime]::UtcNow -gt $deadline)
             if (!$ready) { throw 'Installed application did not reach initialized logging.' }
             Start-Sleep -Seconds 3

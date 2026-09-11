@@ -193,6 +193,9 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.paths }}
           if-no-files-found: error
+          # A failed installer gate may already have retained its build output.
+          # Replace only this run's provisional platform artifact on a rerun.
+          overwrite: true
 
   publish:
     needs: [source, bundle]

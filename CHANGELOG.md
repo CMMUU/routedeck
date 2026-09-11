@@ -7,6 +7,7 @@
 - Center both rows using the real status-button geometry, clear native text and fixed width when traffic display is disabled, and keep explicit binary rate units in tooltips.
 - Handle rounded unit boundaries and very large rates without truncation; cover native 1x/2x rendering, light/dark/selected appearance, shared branding and disable/re-enable regressions.
 - Synchronize application notes, website documentation, GitHub and Gitee through the existing verified release pipeline.
+- Make Windows installer readiness polling tolerate the journal's atomic replacement gap without relaxing startup, window, proxy or timeout assertions.
 
 ## 0.7.8 - 2026-09-11
 
